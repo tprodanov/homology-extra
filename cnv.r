@@ -8,6 +8,17 @@ suppressMessages(library(cowplot))
 suppressMessages(library(zoo))
 suppressMessages(library(dplyr))
 suppressMessages(library(tidyr))
+suppressMessages(library(viridis))
+
+if (length(args) == 0) {
+  data_dir <- '~/Data/hg38/jvc/runs/024.split/C4A-a/depth'
+  plots_prefix <- '~/Data/hg38/jvc/plots/024.split/C4A/022/'
+} else {
+  data_dir <- args[1]
+  plots_prefix <- args[2]
+}
+cat(sprintf('Reading depth from %s/*.csv\n', data_dir))
+cat(sprintf('Saving plots to %s*.png\n', plots_prefix))
 
 get.mav <- function(values, n) {
   rollapply(values, width=n, FUN=mean, align="right")
@@ -16,7 +27,13 @@ get.mav <- function(values, n) {
 aggregate.mav <- function(df, ploidies, columns, min_mav=1, max_mav=30) {
   n_windows <- length(ploidies)
   n_samples <- length(unique(df$sample))
-  stopifnot(n_windows * n_samples == nrow(df))
+  if (n_windows * n_samples != nrow(df)) {
+    cat(sprintf('Ploidies: n_windows = %d\n', n_windows))
+    cat(sprintf('Df:       n_samples = %d\n', n_samples))
+    cat(sprintf('n_windows * n_samples = %d\n', n_windows * n_samples))
+    cat(sprintf('Dataframe length      = %d\n', nrow(df)))
+    stop(1)
+  }
 
   const_ends <- cumsum(rle(ploidies)$lengths)
   const_ranges <- data.frame(start=c(0, head(const_ends, -1)) + 1, end=const_ends)
@@ -36,6 +53,10 @@ aggregate.mav <- function(df, ploidies, columns, min_mav=1, max_mav=30) {
   new_n_windows <- length(regions.mav(1:n_windows))
   res <- data.frame(window_ix=rep(1:new_n_windows, n_samples))
   for (col in columns) {
+    if (any(is.na(df[col]))) {
+      cat(sprintf('Column "%s" contains NAs\n', col))
+      stop(1)
+    }
     tmp <- aggregate(as.formula(sprintf('%s ~ sample', col)), df, regions.mav)
     tmp <- cbind(data.frame(sample=tmp$sample), as.data.frame(tmp[[col]]))
     tmp <- pivot_longer(tmp, starts_with('V'), names_prefix='V',
@@ -49,149 +70,172 @@ aggregate.mav <- function(df, ploidies, columns, min_mav=1, max_mav=30) {
   res
 }
 
-load <- function(name) {
-  read.csv(sprintf('%s/%s.csv', data_dir, name), sep='\t', comment.char='#')
+load <- function(name, ...) {
+  filename <- sprintf('%s/%s.csv', data_dir, name)
+  if (!file.exists(filename)) {
+    cat(sprintf('Cannot load csv file "%s"\n', filename))
+    ignore <- file.remove(tmp_file)
+    stop(1)
+  }
+  read.csv(filename, sep='\t', comment.char='#', ...)
 }
-
-assign_groups <- function(df, groups) {
-  df$group <- groups[df$sample, 'path']
-  df$shift <- groups[df$sample, 'shift']
-  n_windows <- sum(df$sample == df$sample[1])
-  groups_table <- table(df$group) / n_windows
-  groups_table <- ifelse(groups_table >= 5,
-                         sprintf('Path %s', names(groups_table)), 'Other')
-  df$group <- groups_table[as.character(df$group)]
-  df$group <- reorder(df$group, df$group, FUN=function(x) -length(x))
-  df
-}
-
-if (length(args) == 0) {
-  dir <- '~/Mapping/hg38/jvc/genes/012'
-  region <- 'C4A'
-  suffix <- '.003'
-  data_dir <- sprintf('%s/%s/depth%s', dir, region, suffix)
-  plots_prefix <- '~/Downloads/'
-} else {
-  data_dir <- args[1]
-  plots_prefix <- args[2]
-}
-cat(sprintf('Reading depth from %s/*.csv\n', data_dir))
-cat(sprintf('Saving plots to %s.*.png\n', plots_prefix))
 
 windows <- load('windows')
 depth <- load('depth')
 viterbi <- load('viterbi')
-groups <- load('viterbi_groups')
+viterbi$iteration <- factor(viterbi$iteration, levels=unique(viterbi$iteration))
+
+important_samples <- c() #'HG01271', 'HG01431')
+has_important <- length(important_samples) > 0
 
 depth$norm_ploidy <- depth$depth1 / depth$bg_depth1 * 2
-depth$norm_ploidy_offset <- depth$norm_ploidy - windows$offset[depth$window_ix + 1]
+if ('offset' %in% colnames(windows)) {
+  depth$norm_ploidy_offset <- depth$norm_ploidy - windows$offset[depth$window_ix + 1]
+} else {
+  depth$norm_ploidy_offset <- depth$norm_ploidy / windows$multiplier[depth$window_ix + 1]
+}
 
-viterbi$iteration <- factor(viterbi$iteration,
-  levels=sprintf('%d%s', 1:100, rep(c('a', 'b'), each=100)))
-row.names(groups) <- groups$sample
+viterbi$iteration <- factor(viterbi$iteration, levels=unique(viterbi$iteration))
+depth_v <- subset(depth, !is.na(viterbi_ix))
+depth_v$norm_err <- depth_v$norm_ploidy - windows$ploidy[depth_v$window_ix + 1]
 
-depth2 <- subset(depth, !is.na(norm_ploidy_offset))
-depth2$norm_ploidy_wo_ploidy <- depth2$norm_ploidy - windows$ploidy[depth2$window_ix + 1]
-means <- aggregate(norm_ploidy_wo_ploidy ~ sample, depth2, function(x)
+# Draw means
+
+means <- aggregate(norm_err ~ sample, depth_v, function(x)
   c('mean' = mean(x), 'var' = var(x)))
-means <- do.call(data.frame, means) %>%
-  rename(mean=norm_ploidy_wo_ploidy.mean, var=norm_ploidy_wo_ploidy.var)
-means <- assign_groups(means, groups)
-means$group_shift <- sprintf('%s(%+d)', means$group, means$shift)
+means <- do.call(data.frame, means) %>% rename(mean=norm_err.mean, var=norm_err.var)
 
-(g6 <- ggplot(means) +
-  geom_point(aes(mean, var, color=group_shift), size=2) +
-  scale_x_continuous('Mean offset', breaks=seq(-10, 20, 0.5)) +
-  scale_y_continuous('Variation') +
-  scale_color_discrete('Path(shift)') +
-  theme_bw())
-(g7 <- ggplot(means) +
-    geom_histogram(aes(mean, fill=group_shift), binwidth=0.02) +
-    scale_x_continuous('Mean offset', breaks=seq(-10, 20, 0.5)) +
-    scale_y_continuous('Count') +
-    scale_fill_discrete('Path(shift)') +
-    theme_bw())
-(g8 <- ggplot(means) +
-    geom_vline(xintercept=0, color='red', alpha=.9) +
-    geom_histogram(aes(mean - round(mean), fill=group_shift), binwidth=0.01) +
-    scale_x_continuous('Distance to nearest integer', breaks=seq(-0.5, 0.5, 0.1)) +
-    scale_y_continuous('Count') +
-    coord_cartesian(xlim=c(-0.5, 0.5)) +
-    theme_bw())
+(g_mean_err <- ggplot(means) +
+    geom_point(aes(mean, var), size=1,
+               color=ifelse(has_important, 'gray70', '#FF4444')) +
+    geom_point(aes(mean, var, color=sample),
+               data=subset(means, sample %in% important_samples)) +
+    scale_x_continuous('Mean normalized error', breaks=seq(-10, 20, 0.5)) +
+    scale_y_continuous('Variation') +
+    scale_color_discrete('Sample') +
+    theme_bw() +
+    theme(panel.grid.major.x = element_line(color='gray70')))
+ggsave(sprintf('%smean_error.png', plots_prefix), width=8, height=5)
 
-plot_grid(g6, g7, g8, ncol=1, rel_heights=c(0.5, 0.25, 0.25))
-ggsave(sprintf('%s.4.png', plots_prefix), width=10, height=10, dpi=600)
+# Moving average (without removing offsets)
 
 depth.mav <- aggregate.mav(depth, windows$ploidy, 'norm_ploidy')
 windows$sample <- 'NULL'
 ploidy.mav <- aggregate.mav(windows, windows$ploidy, 'ploidy')
 
-(g1 <- ggplot(depth.mav) +
-  geom_line(aes(window_ix, ploidy), data=ploidy.mav, size=2, color='black') +
-  geom_line(aes(window_ix, norm_ploidy, group=sample), color='blue', alpha=.1) +
-  scale_y_continuous('Normalized ploidy', breaks=-10:20) +
-  scale_x_continuous('Moving window') +
-  ggtitle('(a) Normalized ploidy (all windows)') +
-  theme_bw())
+(g_all <- ggplot(depth.mav, aes(window_ix, norm_ploidy)) +
+    geom_line(aes(y=ploidy), data=ploidy.mav, color='black', size=1) +
+    geom_line(aes(group=sample), alpha=0.1,
+              color=ifelse(has_important, 'gray30', 'blue')) +
+    geom_line(aes(color=sample),
+              data=subset(depth.mav, sample %in% important_samples)) +
+    scale_y_continuous('Normalized ploidy', breaks=-10:20) +
+    scale_x_continuous('Moving window') +
+    scale_color_discrete('Sample') +
+    ggtitle('(a) Normalized ploidy (all windows)') +
+    theme_bw())
+ggsave(sprintf('%snorm_ploidy_a.png', plots_prefix), width=8, height=5)
 
-windows2 <- subset(windows, !is.na(viterbi_ix))
-depth2.mav <- aggregate.mav(depth2, windows2$ploidy,
-  c('norm_ploidy', 'norm_ploidy_offset')) %>% assign_groups(groups)
-ploidy2.mav <- aggregate.mav(windows2, windows2$ploidy, 'ploidy')
+# Moving average (only good windows)
 
-(g2 <- ggplot(depth2.mav) +
-  geom_line(aes(window_ix, ploidy), data=ploidy2.mav, size=2, color='black') +
-  geom_line(aes(window_ix, norm_ploidy, group=sample), color='blue', alpha=.1) +
+windows_v <- subset(windows, !is.na(viterbi_ix))
+depth_v.mav <- aggregate.mav(depth_v, windows_v$ploidy,
+                             c('norm_ploidy', 'norm_ploidy_offset'))
+ploidy_v.mav <- aggregate.mav(windows_v, windows_v$ploidy, 'ploidy')
+
+(g_v <- ggplot(depth_v.mav, aes(window_ix, norm_ploidy)) +
+  geom_line(aes(y=ploidy), data=ploidy_v.mav, size=1, color='black') +
+  geom_line(aes(group=sample), alpha=.1,
+            color=ifelse(has_important, 'gray30', 'blue')) +
+    geom_line(aes(color=sample),
+              data=subset(depth_v.mav, sample %in% important_samples)) +
   scale_y_continuous('Normalized ploidy', breaks=-10:20) +
   scale_x_continuous('Moving window') +
   ggtitle('(b) Normalized ploidy (good windows)') +
   theme_bw())
+ggsave(sprintf('%snorm_ploidy_b.png', plots_prefix), width=8, height=5)
 
-(g3 <- ggplot(depth2.mav) +
-  geom_line(aes(window_ix, ploidy), data=ploidy2.mav, size=2, color='black') +
-  geom_line(aes(window_ix, norm_ploidy_offset, group=sample), color='blue', alpha=.1) +
-  scale_y_continuous('Shifted normalized ploidy', breaks=-10:20) +
-  scale_x_continuous('Moving window') +
-  ggtitle('(c) Shifted normalized ploidy (good windows)') +
-  theme_bw())
-plot_grid(g1, g2, g3, ncol=1)
-ggsave(sprintf('%s.1.png', plots_prefix), width=10, height=8, dpi=600)
+# Moving average (only good windows, removing offsets)
 
-(g4 <- ggplot(depth2.mav) +
-  geom_line(aes(window_ix, ploidy), data=ploidy2.mav, size=.5, color='black') +
-  geom_line(aes(window_ix, norm_ploidy_offset, group=sample,
-                color=sprintf('%+d', shift)), alpha=.5) +
-  scale_y_continuous('Normalized ploidy - offset', breaks=-10:20) +
-  scale_x_continuous('Moving window') +
-  facet_wrap(~ group, ncol=1) +
-  scale_color_discrete('Shift') +
-  theme_bw() +
-  theme(strip.text.x=element_text(margin=margin(b=0, t=0))))
-ggsave(sprintf('%s.2.png', plots_prefix), g4, width=10, height=8, dpi=600)
+(g_v_offset <- ggplot(depth_v.mav, aes(window_ix, norm_ploidy_offset)) +
+    geom_line(aes(y=ploidy), data=ploidy_v.mav, size=1, color='black') +
+    geom_line(aes(group=sample), alpha=.1,
+              color=ifelse(has_important, 'gray30', 'blue')) +
+    geom_line(aes(color=sample),
+              data=subset(depth_v.mav, sample %in% important_samples)) +
+    scale_y_continuous('Normalized ploidy', breaks=-10:20) +
+    scale_x_continuous('Moving window') +
+    ggtitle('(c) Normalized ploidy (good windows, remove offset)') +
+    theme_bw())
+ggsave(sprintf('%snorm_ploidy_c.png', plots_prefix), width=8, height=5)
 
-(g5 <- ggplot(viterbi) +
-  geom_line(aes(viterbi_ix, state, group=sample), color='blue', alpha=.5) +
-  facet_wrap(~ iteration, ncol=3) +
-  scale_x_continuous('Window') +
-  scale_y_continuous('Hidden state') +
-  theme_bw() +
-  theme(strip.text.x=element_text(margin=margin(b=0, t=0))))
-ggsave(sprintf('%s.3.png', plots_prefix), g5, width=10, height=10, dpi=600)
-cat(sprintf('Success [%s]\n', data_dir))
+# Norm ploidy, colored by predicted ploidy
 
-# VITERBI_IX <- 0
-# WINDOW_IX <- subset(windows, viterbi_ix == VITERBI_IX)$window_ix
-# depth_w <- subset(depth, window_ix == WINDOW_IX)
-# levels(viterbi$iteration)
-# viterbi_w <- subset(viterbi, viterbi_ix == VITERBI_IX & iteration == '9a')
-# samples_state <- viterbi_w$state
-# names(samples_state) <- as.character(viterbi_w$sample)
-# depth_w$state <- samples_state[depth_w$sample]
-# 
-# ggplot(depth_w) +
-#   geom_histogram(aes(norm_ploidy, fill=factor(state)),
-#                  position='identity', binwidth=0.1, alpha=.4) +
-#   geom_vline(xintercept=subset(windows, window_ix == WINDOW_IX)$shift + 1:6) +
-#   scale_x_continuous(breaks=0:10)
-# 
-# ggsave('~/Downloads/2.png', width=10, height=15)
+viterbi$pred_ploidy <- viterbi$state + windows_v$ploidy[viterbi$viterbi_ix + 1]
+viterbi_last <- subset(viterbi, iteration == 'rev') %>% select(!iteration)
+depth_v2 <- left_join(depth_v, viterbi_last, by=c('viterbi_ix', 'sample'))
+depth_v2.mav <- aggregate.mav(depth_v2, windows_v$ploidy,
+      c('norm_ploidy_offset', 'pred_ploidy'))
+depth_v2.mav <- mutate(depth_v2.mav,
+    pred_ploidy_int = ifelse(pred_ploidy == round(pred_ploidy), pred_ploidy, NA))
+
+(g_v_offset <- ggplot(depth_v2.mav, aes(window_ix, norm_ploidy_offset)) +
+    geom_line(aes(y=ploidy), data=ploidy_v.mav, size=1, color='black') +
+    geom_line(aes(group=sample, color=factor(pred_ploidy_int)), alpha=.6) +
+    scale_y_continuous('Normalized ploidy', breaks=-10:20) +
+    scale_x_continuous('Moving window') +
+    ggtitle('(d) Normalized ploidy (good windows, remove offset)') +
+    guides(color = guide_legend(override.aes = list(alpha=1, size=2))) +
+    scale_color_viridis('Predicted\nploidy', discrete=T, na.value='gray60') +
+    theme_bw())
+ggsave(sprintf('%snorm_ploidy_d.png', plots_prefix), width=8, height=5)
+
+# Viterbi paths (geom_tile)
+
+viterbi_matrix <- select(viterbi_last, sample, viterbi_ix, pred_ploidy) %>%
+  pivot_wider(names_from = 'sample', values_from = 'pred_ploidy') %>%
+  select(!viterbi_ix) %>%
+  as.matrix
+sample_dist <- dist(t(viterbi_matrix))
+sample_clust <- hclust(sample_dist)
+viterbi$sample <- factor(viterbi$sample, levels=sample_clust$labels[sample_clust$order])
+viterbi_first_last <- subset(viterbi, iteration %in% c('1a', 'rev'))
+
+ggplot(viterbi_first_last) +
+  geom_tile(aes(x=viterbi_ix, y=sample, fill=factor(pred_ploidy))) +
+  scale_x_continuous('100bp window') +
+  scale_y_discrete('Samples', labels=NULL, breaks=NULL) +
+  scale_fill_viridis('Predicted\nploidy', discrete=T) +
+  facet_wrap(~ iteration, ncol=1) +
+  theme_minimal() +
+  theme(panel.grid.major.x = element_blank())
+ggsave(sprintf('%sviterbi_tile.png', plots_prefix), width=8, height=8)
+
+# Viterbi paths (geom_line)
+
+transitions <- unlist(aggregate(pred_ploidy ~ sample,
+                                viterbi_last, function(x) which(diff(x) != 0))$pred_ploidy)
+n_samples <- length(unique(viterbi$sample))
+transitions <- table(transitions)
+transitions <- as.numeric(names(transitions)[transitions >= 0.1 * n_samples])
+text_pos <- c(0, round((head(transitions, -1) + tail(transitions, -1)) / 2),
+                 max(windows_v$viterbi_ix))
+
+viterbi_counts <- filter(viterbi_first_last, viterbi_ix %in% text_pos) %>%
+  aggregate(sample ~ iteration + viterbi_ix + pred_ploidy, ., length)
+
+ggplot(viterbi_first_last, aes(viterbi_ix, pred_ploidy)) +
+  geom_line(aes(y=ploidy), data=windows_v, size=5, color='gray70') +
+  geom_line(aes(group=sample), alpha=.2,
+            color=ifelse(has_important, 'gray50', 'blue')) +
+  geom_line(aes(color=sample),
+            data=subset(viterbi_first_last, sample %in% important_samples),
+            size=1.5) +
+  geom_text(aes(y = pred_ploidy + 0.3, label = sample), data=viterbi_counts, size=3) +
+  scale_x_continuous('100bp window') +
+  scale_y_continuous('Predicted ploidy', breaks=0:20, minor_breaks=NULL) +
+  scale_color_discrete('Sample') +
+  facet_wrap(~ iteration, ncol=1) +
+  theme_bw()
+ggsave(sprintf('%sviterbi_line.png', plots_prefix), width=8, height=5)
+
