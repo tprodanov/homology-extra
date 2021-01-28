@@ -95,7 +95,7 @@ def main():
     parser = argparse.ArgumentParser(
         description='Add columns with Quick-Mer2 results.',
         formatter_class=argparse.RawTextHelpFormatter, add_help=False,
-        usage='-s <file> -q <dir> -o <file>')
+        usage='%(prog)s -s <file> -q <dir> -o <file>')
     io_args = parser.add_argument_group('Input/output arguments')
     io_args.add_argument('-s', '--summary', type=argparse.FileType(), metavar='<file>', required=True,
         help='Homology tools summary.')
