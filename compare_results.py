@@ -38,6 +38,9 @@ def get_positions(gene):
     if gene == 'FCGR3A':
         chrom = 'chr1'
         pos = (161_545_000,)
+    elif gene == 'AMY1C':
+        chrom = 'chr1'
+        pos = (103_755_000,)
     else:
         sys.stderr.write(f'Cannot find gene {gene}\n')
         exit(1)
@@ -68,10 +71,10 @@ def total_copy_num_distance(entry, b_copy_num):
         return np.nan
     elif a_copy_num.startswith('>'):
         a_copy_num = float(a_copy_num[1:]) + 1
-        return min(0, a_copy_num - b_copy_num)
+        return max(0, a_copy_num - b_copy_num)
     elif a_copy_num.startswith('<'):
         a_copy_num = float(a_copy_num[1:]) - 1
-        return min(0, b_copy_num - a_copy_num)
+        return max(0, b_copy_num - a_copy_num)
     else:
         a_copy_num = float(a_copy_num)
         return abs(a_copy_num - b_copy_num)
@@ -103,7 +106,7 @@ def paralog_copy_num_distance(entry, b_paralog):
 
 
 class ResEntry:
-    def __init__(self, entry, method, b_copy_num, b_paralog):
+    def __init__(self, entry, method, b_copy_num, b_paralog=None):
         self.entry = entry
         self.method = method
         self.copy_num_dist = total_copy_num_distance(entry, b_copy_num)
@@ -139,15 +142,43 @@ def compare_line_fcgr3a(line, entries):
 
     # SYBR Green
     sybr_copy_num = line[9]
-    yield ResEntry(entry, 'SYBR_Green', sybr_copy_num, None)
+    yield ResEntry(entry, 'SYBR_Green', sybr_copy_num)
+
+
+def compare_line_amy1c_2(line, entries):
+    line = line.strip().split('\t')
+    sample = line[0]
+    if sample not in entries:
+        return
+    entry = entries[sample][0]
+    # TODO: What is this method?
+    yield ResEntry(entry, '*', line[11])
+
+
+def compare_line_amy1c_qpcr(line, entries):
+    line = line.strip('\n').split('\t')
+    sample = line[0]
+    if sample not in entries:
+        return
+    entry = entries[sample][0]
+
+    prt, qpcr, g1k, qpcr_14 = line[1:]
+    yield ResEntry(entry, 'PRT', prt)
+    yield ResEntry(entry, 'QPCR', qpcr)
+    yield ResEntry(entry, 'g1k', g1k)
+    yield ResEntry(entry, 'QPCR_14', qpcr_14)
 
 
 def select_function(gene, method):
     if gene == 'FCGR3A':
         assert method is None
         return compare_line_fcgr3a
+    elif gene == 'AMY1C' and method == '2':
+        return compare_line_amy1c_2
+    elif gene == 'AMY1C' and method == 'QPCR':
+        return compare_line_amy1c_qpcr
     else:
-        sys.stderr.write(f'Cannot find gene {gene}\n')
+        sys.stderr.write(f'Cannot find gene {gene} and method {method}\n')
         exit(1)
 
 
