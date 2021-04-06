@@ -109,14 +109,21 @@ class ResEntry:
     def __init__(self, entry, method, b_copy_num, b_paralog=None):
         self.entry = entry
         self.method = method
-        self.copy_num_dist = total_copy_num_distance(entry, b_copy_num)
-        self.paralog_dist = paralog_copy_num_distance(entry, b_paralog)
+        self.b_copy_num = b_copy_num
+        self.b_paralog = b_paralog
 
     def write_to(self, out, populations):
         entry = self.entry
+        b_copy_num_str = str(self.b_copy_num) if self.b_copy_num is not None else '*'
+        b_paralog_str = ','.join(str(value) if value is not None else '?' for value in self.b_paralog) \
+            if self.b_paralog is not None else '*'
+        copy_num_dist = total_copy_num_distance(entry, self.b_copy_num)
+        paralog_dist = paralog_copy_num_distance(entry, self.b_paralog)
+
         out.write('{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t'.format(entry.sample, populations[entry.sample],
             entry.filter, entry.copy_num, entry.qual, entry.paralog_filter, entry.paralog_copy_num, entry.paralog_qual))
-        out.write('{}\t{:.4g}\t{:.4g}\n'.format(self.method, self.copy_num_dist, self.paralog_dist))
+        out.write('{}\t{}\t{}\t{:.4g}\t{:.4g}\n'.format(
+            self.method, b_copy_num_str, b_paralog_str, copy_num_dist, paralog_dist))
 
 
 def compare_line_fcgr3a(line, entries):
@@ -186,7 +193,7 @@ def compare(b_in, entries, populations, gene, method, out):
     out.write('# {}\n'.format(' '.join(sys.argv)))
     out.write('sample\tpopulation\tcopy_num_filter\tcopy_num\tcopy_num_qual\t'
         'paralog_filter\tparalog_copy_num\tparalog_qual\t'
-        'method\ttotal_dist\tparalog_dist\n')
+        'method\tb_copy_num\tb_paralog\ttotal_dist\tparalog_dist\n')
 
     compare = select_function(gene, method)
     for line in b_in:
