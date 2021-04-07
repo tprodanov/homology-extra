@@ -41,6 +41,9 @@ def get_positions(gene):
     elif gene == 'AMY1C':
         chrom = 'chr1'
         pos = (103_755_000,)
+    elif gene == 'SMN1':
+        chrom = 'chr5'
+        pos = (70_940_000, 70_950_000)
     else:
         sys.stderr.write(f'Cannot find gene {gene}\n')
         exit(1)
@@ -53,7 +56,7 @@ def load_populations(inp):
         return res
 
     for line in inp:
-        line.strip().split('\t')
+        line = line.strip().split('\t')
         res[line[1]] = line[6]
     return res
 
@@ -171,9 +174,78 @@ def compare_line_amy1c_qpcr(line, entries):
 
     prt, qpcr, g1k, qpcr_14 = line[1:]
     yield ResEntry(entry, 'PRT', prt)
-    yield ResEntry(entry, 'QPCR', qpcr)
+    yield ResEntry(entry, 'qPCR', qpcr)
     yield ResEntry(entry, 'g1k', g1k)
-    yield ResEntry(entry, 'QPCR_14', qpcr_14)
+    yield ResEntry(entry, 'qPCR_14', qpcr_14)
+
+
+def combine_smn_entries(entry_16, entry_78):
+    try:
+        paralog_78 = list(map(int, entry_78.paralog_copy_num.split(',')))
+        total_16 = int(entry_16.copy_num)
+    except ValueError:
+        return
+    if entry_16.paralog_copy_num != '?,?':
+        return
+
+    entry_16.paralog_filter += ';Inferred'
+    entry_16.paralog_copy_num = '{},{}'.format(paralog_78[0], total_16 - paralog_78[0])
+
+
+def compare_line_smn1_caller(line, entries):
+    line = line.strip().split('\t')
+    sample = line[0]
+    if sample not in entries:
+        return
+
+    # Two subregions: 16: exons 1-6 and 78: exons 7-8. delta: without exons 7-8.
+    entry_16, entry_78 = entries[sample]
+    combine_smn_entries(entry_16, entry_78)
+    smn1_cn, smn2_full_cn, smn2_delta_cn, total_16, total_78 = line[3:8]
+    try:
+        smn1_cn = int(smn1_cn)
+        smn2_full_cn = int(smn2_full_cn)
+        smn2_delta_cn = int(smn2_delta_cn)
+        paralog_16 = (smn1_cn, smn2_full_cn + smn2_delta_cn)
+        paralog_78 = (smn1_cn, smn2_full_cn)
+    except ValueError:
+        paralog_16 = None
+        paralog_78 = None
+    yield ResEntry(entry_16, 'caller_16', total_16, paralog_16)
+    yield ResEntry(entry_78, 'caller_78', total_78, paralog_78)
+
+
+def compare_line_smn1_mlpa(line, entries):
+    line = line.strip().split('\t')
+    sample = line[2]
+    if sample not in entries:
+        return
+
+    entry_16, entry_78 = entries[sample]
+    combine_smn_entries(entry_16, entry_78)
+    total_16, total_78 = line[3:5]
+    yield ResEntry(entry_16, 'mlpa_16', total_16)
+    yield ResEntry(entry_78, 'mlpa_78', total_78)
+
+
+def compare_all_smn1_quick_mer2(file, entries):
+    header = next(file).strip().split('\t')
+    smn2 = next(file).strip().split('\t')
+    smn1 = next(file).strip().split('\t')
+
+    chrom, (pos1, pos2) = get_positions('SMN1')
+    assert chrom == smn1[0] and int(smn1[1]) <= pos1 < int(smn1[2])
+
+    for i in range(7, len(header)):
+        sample = header[i]
+        if sample not in entries:
+            continue
+        entry_16, entry_78 = entries[sample]
+        combine_smn_entries(entry_16, entry_78)
+
+        cn1 = float(smn1[i])
+        cn2 = float(smn2[i])
+        yield ResEntry(entry_16, 'qm2', cn1 + cn2, (cn1, cn2))
 
 
 def select_function(gene, method):
@@ -182,8 +254,14 @@ def select_function(gene, method):
         return compare_line_fcgr3a
     elif gene == 'AMY1C' and method == '2':
         return compare_line_amy1c_2
-    elif gene == 'AMY1C' and method == 'QPCR':
+    elif gene == 'AMY1C' and method == 'qPCR':
         return compare_line_amy1c_qpcr
+    elif gene == 'SMN1' and method == 'caller':
+        return compare_line_smn1_caller
+    elif gene == 'SMN1' and method == 'MLPA':
+        return compare_line_smn1_mlpa
+    elif gene == 'SMN1' and method == 'qm2':
+        return compare_all_smn1_quick_mer2
     else:
         sys.stderr.write(f'Cannot find gene {gene} and method {method}\n')
         exit(1)
@@ -194,6 +272,9 @@ def compare(b_in, entries, populations, gene, method, out):
     out.write('sample\tpopulation\tcopy_num_filter\tcopy_num\tcopy_num_qual\t'
         'paralog_filter\tparalog_copy_num\tparalog_qual\t'
         'method\tb_copy_num\tb_paralog\ttotal_dist\tparalog_dist\n')
+
+    if gene == 'SMN1' and method == 'qm2':
+        b_in = (b_in,)
 
     compare = select_function(gene, method)
     for line in b_in:
