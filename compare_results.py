@@ -44,6 +44,16 @@ def get_positions(gene):
     elif gene == 'SMN1':
         chrom = 'chr5'
         pos = (70_940_000, 70_950_000)
+    elif gene == 'NPY4R':
+        chrom = 'chr10'
+        pos = (46_462_500,)
+    elif gene == 'RHD':
+        chrom = 'chr1'
+        pos = (25_389_000,)
+    elif gene == 'PMS2':
+        chrom = 'chr7'
+        # Exon 14 (13?)
+        pos = (5_977_650,)
     else:
         sys.stderr.write(f'Cannot find gene {gene}\n')
         exit(1)
@@ -248,6 +258,46 @@ def compare_all_smn1_quick_mer2(file, entries):
         yield ResEntry(entry_16, 'qm2', cn1 + cn2, (cn1, cn2))
 
 
+def compare_line_npy4r(line, entries):
+    line = line.strip('\n').split('\t')
+    sample = line[0]
+    if sample not in entries:
+        return
+    entry = entries[sample][0]
+
+    freec, cnvnator, ddpcr = line[2:]
+    yield ResEntry(entry, 'FREEC', freec)
+    yield ResEntry(entry, 'CNVnator', cnvnator)
+    yield ResEntry(entry, 'ddPCR', ddpcr)
+
+
+def compare_line_rhd(line, entries):
+    line = line.strip('\n').split('\t')
+    sample = line[0].strip('*')
+    if sample not in entries:
+        return
+    entry = entries[sample][0]
+
+    rhd_1, rhce_1, rh_1, rhd_2, rhce_2 = line[2:]
+    rh_1 = rh_1.split()[0]
+    yield ResEntry(entry, '1', rh_1, (rhce_1, rhd_1))
+    yield ResEntry(entry, '2', int(rhd_2) + int(rhce_2), (rhce_2, rhd_2))
+
+
+def compare_line_pms2(line, entries):
+    line = line.strip('\n').split('\t')
+    sample = line[0]
+    if sample not in entries:
+        return
+    entry = entries[sample][0]
+
+    has_deletion = False
+    if len(line) > 1 and line[1].strip():
+        assert line[1] == 'Exon 13-14 deletion'
+        has_deletion = True
+    yield ResEntry(entry, 'exon_13_14', 4 - has_deletion)
+
+
 def select_function(gene, method):
     if gene == 'FCGR3A':
         assert method is None
@@ -262,6 +312,12 @@ def select_function(gene, method):
         return compare_line_smn1_mlpa
     elif gene == 'SMN1' and method == 'qm2':
         return compare_all_smn1_quick_mer2
+    elif gene == 'NPY4R':
+        return compare_line_npy4r
+    elif gene == 'RHD':
+        return compare_line_rhd
+    elif gene == 'PMS2':
+        return compare_line_pms2
     else:
         sys.stderr.write(f'Cannot find gene {gene} and method {method}\n')
         exit(1)
