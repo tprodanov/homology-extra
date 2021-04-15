@@ -21,14 +21,14 @@ class SummaryEntry:
 
 
 def load_summary(inp, chrom, positions):
-    summaries = defaultdict(lambda: [None] * len(positions))
+    summaries = defaultdict(dict)
     for line in inp:
         if line.startswith('#'):
             continue
         entry = SummaryEntry(line)
-        for i, pos in enumerate(positions):
+        for key, pos in positions.items():
             if entry.covers(chrom, pos):
-                summaries[entry.sample][i] = entry
+                summaries[entry.sample][key] = entry
     return summaries
 
 
@@ -43,7 +43,10 @@ def get_positions(gene):
         pos = (103_755_000,)
     elif gene == 'SMN1':
         chrom = 'chr5'
-        pos = (70_940_000, 70_950_000)
+        pos = { 'SERF1A_middle': 70_905_000,
+                'SERF1A_end': 70_918_500,
+                'SMN1_middle': 70_940_000,
+                'SMN1_end': 70_950_000 }
     elif gene == 'NPY4R':
         chrom = 'chr10'
         pos = (46_462_500,)
@@ -54,20 +57,50 @@ def get_positions(gene):
         chrom = 'chr7'
         # Exon 14 (13?)
         pos = (5_977_650,)
+    elif gene == 'C4A':
+        chrom = 'chr6'
+        pos = { 'C4A_start': 31_981_000,
+                'C4A_middle': 31_986_000,
+                'C4A_end': 32_000_000 }
+    elif gene == 'FAM185A':
+        chrom = 'chr7'
+        pos = { 'before': 102_790_000,
+                'del': 102_795_000,
+                'after': 102_800_000 }
+    elif gene == 'NBPF4':
+        chrom = 'chr1'
+        pos = { 'start': 108_230_000,
+                'middle': 108_240_000,
+                'end': 108_244_000 }
+    elif gene == 'EIF3C':
+        chrom = 'chr16'
+        pos = { 'start': 28_690_000,
+                'middle': 28_705_000,
+                'end': 28_725_000 }
+    elif gene == 'SRGAP2':
+        chrom = 'chr1'
+        pos = { 'a': 206_200_000,
+                'b': 206_250_000,
+                'c': 206_300_000,
+                'd': 206_350_000,
+                'e': 206_400_000
+        }
     else:
         sys.stderr.write(f'Cannot find gene {gene}\n')
         exit(1)
+    if not isinstance(pos, dict):
+        pos = dict(enumerate(pos))
     return chrom, pos
 
 
 def load_populations(inp):
-    res = defaultdict(lambda: '*')
+    res = defaultdict(lambda: '*\t*')
     if inp is None:
         return res
 
     for line in inp:
         line = line.strip().split('\t')
-        res[line[1]] = line[6]
+        res[line[0]] = '{}\t{}'.format(line[3], line[5])
     return res
 
 
@@ -209,7 +242,9 @@ def compare_line_smn1_caller(line, entries):
         return
 
     # Two subregions: 16: exons 1-6 and 78: exons 7-8. delta: without exons 7-8.
-    entry_16, entry_78 = entries[sample]
+    sample_entries = entries[sample]
+    entry_16 = sample_entries.get('SMN1-middle')
+    entry_78 = sample_entries.get('SMN1-end')
     combine_smn_entries(entry_16, entry_78)
     smn1_cn, smn2_full_cn, smn2_delta_cn, total_16, total_78 = line[3:8]
     try:
@@ -231,7 +266,9 @@ def compare_line_smn1_mlpa(line, entries):
     if sample not in entries:
         return
 
-    entry_16, entry_78 = entries[sample]
+    sample_entries = entries[sample]
+    entry_16 = sample_entries.get('SMN1-middle')
+    entry_78 = sample_entries.get('SMN1-end')
     combine_smn_entries(entry_16, entry_78)
     total_16, total_78 = line[3:5]
     yield ResEntry(entry_16, 'mlpa_16', total_16)
@@ -250,7 +287,9 @@ def compare_all_smn1_quick_mer2(file, entries):
         sample = header[i]
         if sample not in entries:
             continue
-        entry_16, entry_78 = entries[sample]
+        sample_entries = entries[sample]
+        entry_16 = sample_entries.get('SMN1-middle')
+        entry_78 = sample_entries.get('SMN1-end')
         combine_smn_entries(entry_16, entry_78)
 
         cn1 = float(smn1[i])
@@ -298,7 +337,15 @@ def compare_line_pms2(line, entries):
     yield ResEntry(entry, 'exon_13_14', 4 - has_deletion)
 
 
+def output_values(sample, entries):
+    for key, entry in entries[sample].items():
+        yield ResEntry(entry, key, None)
+
+
 def select_function(gene, method):
+    if method == 'none':
+        return output_values
+
     if gene == 'FCGR3A':
         assert method is None
         return compare_line_fcgr3a
@@ -325,10 +372,12 @@ def select_function(gene, method):
 
 def compare(b_in, entries, populations, gene, method, out):
     out.write('# {}\n'.format(' '.join(sys.argv)))
-    out.write('sample\tpopulation\tcopy_num_filter\tcopy_num\tcopy_num_qual\t'
+    out.write('sample\tpopulation\tsuperpopulation\tcopy_num_filter\tcopy_num\tcopy_num_qual\t'
         'paralog_filter\tparalog_copy_num\tparalog_qual\t'
         'method\tb_copy_num\tb_paralog\ttotal_dist\tparalog_dist\n')
 
+    if method == 'none':
+        b_in = list(entries.keys())
     if gene == 'SMN1' and method == 'qm2':
         b_in = (b_in,)
 
@@ -346,7 +395,7 @@ def main():
     req_args = parser.add_argument_group('Required arguments')
     req_args.add_argument('-a', type=argparse.FileType(), metavar='<file>', required=True,
         help='Homology tools summary.')
-    req_args.add_argument('-b', type=argparse.FileType(), metavar='<file>', required=True,
+    req_args.add_argument('-b', type=argparse.FileType(), metavar='<file>',
         help='Results of another method.')
     req_args.add_argument('-p', '--populations', type=argparse.FileType(), metavar='<file>', required=False,
         help='Optional: sample populations. 2nd column is sample, 7th column is population.')
@@ -360,6 +409,8 @@ def main():
     oth_args = parser.add_argument_group('Other arguments')
     oth_args.add_argument('-h', '--help', action='help', help='Show this message and exit.')
     args = parser.parse_args()
+
+    assert args.method == 'none' or args.b is not None
 
     populations = load_populations(args.populations)
     chrom, positions = get_positions(args.gene)
