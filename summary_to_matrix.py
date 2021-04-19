@@ -46,7 +46,9 @@ def load_summaries(inputs):
         sample = line[4]
         results[(sample, chrom)].append((start, end, line[3:]))
         if (start, end) not in unique_events[chrom]:
-            unique_events[chrom][(start, end)] = line[3:]
+            unique_events[chrom][(start, end)] = [line[3:]]
+        else:
+            unique_events[chrom][(start, end)].append(line[3:])
 
     results2 = {}
     for (sample, chrom), curr_results in results.items():
@@ -124,7 +126,7 @@ def write_header(out, samples):
     out.write('## coverage - percentage of the region covered by the sample entries.\n')
     out.write('## Entries for sample can contain "!", that means that several entries '
         'cover the region and have different values.\n')
-    out.write('#chrom\tstart\tend\tregion\tref\tcopy_num_freqs\tparalog_freqs\tother_regions\t')
+    out.write('#chrom\tstart\tend\tregion\tref\tcopy_num_freqs\tparalog_freqs\tinfo\tother_regions\t')
     out.write('\t'.join(samples))
     out.write('\n')
 
@@ -132,7 +134,8 @@ def write_header(out, samples):
 def create_matrix(results, unique_events, chrom, samples, out):
     unique_events = unique_events[chrom]
     for start, end in sorted(unique_events.keys()):
-        template = unique_events[(start, end)]
+        templates = unique_events[(start, end)]
+        template = templates[0]
         region_name = template[0]
         pos2 = template[2]
         if pos2 == '' or pos2 == '*':
@@ -156,14 +159,19 @@ def create_matrix(results, unique_events, chrom, samples, out):
             # else: ignore
         copy_num_freqs.sort()
         copy_num_freq_sum = sum(map(operator.itemgetter(2), copy_num_freqs))
-        out.write(' '.join('{}={:.3f}'.format(copy_num, freq / copy_num_freq_sum)
+        out.write(' '.join('{}={:.5g}'.format(copy_num, freq / copy_num_freq_sum)
             for _, copy_num, freq in copy_num_freqs))
         out.write('\t')
 
         paralog_freq_sum = sum(all_paralog_cns.values())
-        out.write(' '.join('{}={:.3f}'.format(paralog, freq / paralog_freq_sum)
+        out.write(' '.join('{}={:.5g}'.format(paralog, freq / paralog_freq_sum)
             for paralog, freq in all_paralog_cns.most_common()))
-        out.write('\t')
+
+        info = 'len={:.1f}kb;samples={}:{}{}'.format((end - start) / 1000, len(templates),
+            ','.join(entry[1] for entry in itertools.islice(templates, 0, 10)),
+            ',...' if len(templates) > 10 else '')
+        out.write('\t{}\t'.format(info))
+
         out.write(pos2)
 
         out.write(sample_results)
