@@ -6,6 +6,7 @@ import itertools
 import collections
 import operator
 import re
+import csv
 
 
 class NonOverlappingSet:
@@ -33,22 +34,31 @@ class NonOverlappingSet:
 
 
 def load_summaries(inputs):
-    # Dictionary (sample, chrom): [(start, end, rest_of_line)].
+    # Dictionary (sample, chrom): [(start, end, ordered_dict)].
     results = collections.defaultdict(list)
     unique_events = collections.defaultdict(dict)
-    for line in itertools.chain(*inputs):
-        if line.startswith('#'):
-            continue
-        line = line.strip().split('\t')
-        chrom, start, end = line[:3]
-        start = int(start)
-        end = int(end)
-        sample = line[4]
-        results[(sample, chrom)].append((start, end, line[3:]))
-        if (start, end) not in unique_events[chrom]:
-            unique_events[chrom][(start, end)] = [line[3:]]
-        else:
-            unique_events[chrom][(start, end)].append(line[3:])
+    for inp in inputs:
+        fieldnames = None
+        for line in inp:
+            if line.startswith('##'):
+                continue
+            assert line.startswith('#')
+            fieldnames = line.lstrip('#').strip().split('\t')
+            break
+        assert fieldnames is not None
+
+        reader = csv.DictReader(inp, fieldnames=fieldnames, delimiter='\t')
+        for row in reader:
+            chrom = row['chrom']
+            start = int(row['start'])
+            end = int(row['end'])
+            sample = row['sample']
+
+            results[(sample, chrom)].append((start, end, row))
+            if (start, end) not in unique_events[chrom]:
+                unique_events[chrom][(start, end)] = [row]
+            else:
+                unique_events[chrom][(start, end)].append(row)
 
     results2 = {}
     for (sample, chrom), curr_results in results.items():
@@ -76,6 +86,7 @@ def process_sample_entries(chrom, start, end, samples, results):
     PCNF = 3
     PCN = 4
     PCNQ = 5
+    keys = 'copy_num_filter copy_num copy_num_qual paralog_filter paralog_copy_num paralog_qual'.split()
 
     all_copy_nums = collections.Counter()
     all_paralog_cns = collections.Counter()
@@ -97,7 +108,7 @@ def process_sample_entries(chrom, start, end, samples, results):
         coverage = 0
         # Convert to int because islice does not work with numpy.int.
         for entry_start, entry_end, entry in itertools.islice(sample_entries, int(start_ix), int(end_ix)):
-            curr_info = entry[3:9]
+            curr_info = [entry[key] for key in keys]
             for i, value in enumerate(curr_info):
                 info_sets[i].add(value)
             curr_cov = min(end, entry_end) - max(start, entry_start)
@@ -136,8 +147,8 @@ def create_matrix(results, unique_events, chrom, samples, out):
     for start, end in sorted(unique_events.keys()):
         templates = unique_events[(start, end)]
         template = templates[0]
-        region_name = template[0]
-        pos2 = template[2]
+        region_name = template['region']
+        pos2 = template['other_regions']
         if pos2 == '' or pos2 == '*':
             ref_copy_num = 2
         else:
@@ -168,7 +179,7 @@ def create_matrix(results, unique_events, chrom, samples, out):
             for paralog, freq in all_paralog_cns.most_common()))
 
         info = 'len={:.1f}kb;samples={}:{}{}'.format((end - start) / 1000, len(templates),
-            ','.join(entry[1] for entry in itertools.islice(templates, 0, 10)),
+            ','.join(row['sample'] for row in itertools.islice(templates, 0, 10)),
             ',...' if len(templates) > 10 else '')
         out.write('\t{}\t'.format(info))
 
