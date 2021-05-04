@@ -5,6 +5,7 @@ import sys
 import numpy as np
 from collections import defaultdict
 import csv
+import operator
 
 
 class SummaryEntry:
@@ -69,8 +70,8 @@ def get_positions(gene):
         pos = (25_402_700,)
     elif gene == 'PMS2':
         chrom = 'chr7'
-        # Exon 14 (13?)
-        pos = (5_977_650,)
+        pos = { 'exon15': 5_973_500,
+                'exon14': 5_977_650 }
     elif gene == 'C4A':
         chrom = 'chr6'
         pos = { 'start': 31_982_100, # Exon 1
@@ -101,10 +102,33 @@ def get_positions(gene):
         }
     elif gene == 'STRC':
         chrom = 'chr15'
-        pos = { 'start': 43_600_000 }
+        pos = { 'gene_start': 43_600_000,
+                '02-01': 43_580_000,
+                '02-02': 43_610_000,
+                '02-03': 43_629_000 }
     elif gene == 'NEB':
         chrom = 'chr2'
         pos = { 'middle': 151_584_000 }
+    elif gene == 'GTF2I':
+        chrom = 'chr7'
+        pos = { '0': 74_750_000 }
+    elif gene == 'APOBEC3A':
+        chrom = 'chr22'
+        pos = { '0': 38_961_000 }
+    elif gene == 'ABCC6':
+        chrom = 'chr16'
+        pos = {
+            '02-01': 16_210_000,
+            '03-01': 16_220_000 }
+    elif gene == 'OTOA':
+        chrom = 'chr16'
+        pos = { '0': 21_750_000 }
+    elif gene == 'HYDIN':
+        chrom = 'chr16'
+        pos = { 'exon18': 71_060_550 }
+    elif gene == 'CEL':
+        chrom = 'chr9'
+        pos = { 'exon9': 133_069_200 }
     else:
         sys.stderr.write(f'Cannot find gene {gene}\n')
         exit(1)
@@ -183,13 +207,17 @@ class ResEntry:
         b_copy_num_str = str(self.b_copy_num) if self.b_copy_num is not None else '*'
         b_paralog_str = ','.join(str(value) if value is not None else '?' for value in self.b_paralog) \
             if self.b_paralog is not None else '*'
-        copy_num_dist = total_copy_num_distance(entry, self.b_copy_num)
-        paralog_dist = paralog_copy_num_distance(entry, self.b_paralog)
 
         out.write('{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t'.format(entry.sample, populations[entry.sample],
             entry.filter, entry.copy_num, entry.qual, entry.paralog_filter, entry.paralog_copy_num, entry.paralog_qual))
-        out.write('{}\t{}\t{}\t{:.4g}\t{:.4g}\n'.format(
-            self.method, b_copy_num_str, b_paralog_str, copy_num_dist, paralog_dist))
+        out.write(str(self.method))
+
+        if self.b_copy_num is not None or self.b_paralog is not None:
+            copy_num_dist = total_copy_num_distance(entry, self.b_copy_num)
+            paralog_dist = paralog_copy_num_distance(entry, self.b_paralog)
+            out.write('\t{}\t{}\t{:.4g}\t{:.4g}'.format(
+                b_copy_num_str, b_paralog_str, copy_num_dist, paralog_dist))
+        out.write('\n')
 
 
 def compare_line_fcgr3a(line, entries):
@@ -295,7 +323,7 @@ def compare_line_smn1_mlpa(line, entries):
     yield ResEntry(entry_78, 'mlpa_78', total_78)
 
 
-def compare_all_smn1_quick_mer2(file, entries):
+def compare_smn1_qm2(file, entries):
     header = next(file).strip().split('\t')
     smn2 = next(file).strip().split('\t')
     smn1 = next(file).strip().split('\t')
@@ -339,8 +367,8 @@ def compare_line_rhd(line, entries):
 
     rhd_1, rhce_1, rh_1, rhd_2, rhce_2 = line[2:]
     rh_1 = rh_1.split()[0]
-    yield ResEntry(entry, '1', rh_1, (rhce_1, rhd_1))
-    yield ResEntry(entry, '2', int(rhd_2) + int(rhce_2), (rhce_2, rhd_2))
+    yield ResEntry(entry, 'WGS', rh_1, (rhce_1, rhd_1))
+    yield ResEntry(entry, 'MIP', int(rhd_2) + int(rhce_2), (rhce_2, rhd_2))
 
 
 def compare_line_pms2(line, entries):
@@ -390,13 +418,99 @@ def compare_line_srgap2(line, entries):
         yield ResEntry(entry, 'FISH', sum(map(float, fish)), tuple(fish))
 
 
+def compare_abcc6_qm2(file, entries):
+    header = next(file).strip().split('\t')
+    p2 = next(file).strip().split('\t')
+    gene = next(file).strip().split('\t')
+    p1 = next(file).strip().split('\t')
+    assert p2[3] == 'ABCC6P2' and gene[3] == 'ABCC6' and p1[3] == 'ABCC6P1'
+
+    for i in range(7, len(header)):
+        sample = header[i]
+        if sample not in entries:
+            continue
+        sample_entries = entries[sample]
+        entry = sample_entries['03-01']
+
+        cn_p2 = float(p2[i])
+        cn_gene = float(gene[i])
+        cn_p1 = float(p1[i])
+        yield ResEntry(entry, 'qm2', cn_p2 + cn_gene + cn_p1, (cn_gene, cn_p2, cn_p1))
+
+
+def compare_gtf2i_qm2(file, entries):
+    header = next(file).strip().split('\t')
+    for line in file:
+        line = line.strip().split('\t')
+        if line[3] == 'GTF2IP4':
+            p4 = line
+        elif line[3] == 'GTF2I':
+            gene = line
+        elif line[3] == 'GTF2IP1':
+            p1 = line
+
+    for i in range(7, len(header)):
+        sample = header[i]
+        if sample not in entries:
+            continue
+        sample_entries = entries[sample]
+        entry = sample_entries['0']
+
+        cn_p4 = float(p4[i])
+        cn_gene = float(gene[i])
+        cn_p1 = float(p1[i])
+        yield ResEntry(entry, 'qm2', cn_p4 + cn_gene + cn_p1, (cn_gene, cn_p4, cn_p1))
+
+
+def compare_cel_qm2(file, entries):
+    header = next(file).strip().split('\t')
+    for line in file:
+        line = line.strip().split('\t')
+        if line[3] == 'CEL':
+            gene = line
+        elif line[3] == 'CELP':
+            p1 = line
+
+    for i in range(7, len(header)):
+        sample = header[i]
+        if sample not in entries:
+            continue
+        sample_entries = entries[sample]
+        entry = sample_entries['exon9']
+
+        cn_gene = float(gene[i])
+        cn_p1 = float(p1[i])
+        yield ResEntry(entry, 'qm2', cn_gene + cn_p1, (cn_gene, cn_p1))
+
+
+def compare_c4a_qm2(file, entries):
+    header = next(file).strip().split('\t')
+    for line in file:
+        line = line.strip().split('\t')
+        if line[3] == 'C4A':
+            gene_a = line
+        elif line[3] == 'C4B':
+            gene_b = line
+
+    for i in range(7, len(header)):
+        sample = header[i]
+        if sample not in entries:
+            continue
+        sample_entries = entries[sample]
+        entry = sample_entries['end']
+
+        cn1 = float(gene_a[i])
+        cn2 = float(gene_b[i])
+        yield ResEntry(entry, 'qm2', cn1 + cn2, (cn1, cn2))
+
+
 def output_values(sample, entries):
     for key, entry in entries[sample].items():
         yield ResEntry(entry, key, None)
 
 
 def select_function(gene, method):
-    if method == 'none':
+    if method is None:
         return output_values
 
     if gene == 'FCGR3A':
@@ -411,34 +525,50 @@ def select_function(gene, method):
     elif gene == 'SMN1' and method == 'MLPA':
         return compare_line_smn1_mlpa
     elif gene == 'SMN1' and method == 'qm2':
-        return compare_all_smn1_quick_mer2
-    elif gene == 'NPY4R':
+        return compare_smn1_qm2
+    elif gene == 'NPY4R' and method == 'exper':
         return compare_line_npy4r
-    elif gene == 'RHCE':
+    elif gene == 'RHCE' and method == 'exper':
         return compare_line_rhd
-    elif gene == 'PMS2':
+    elif gene == 'PMS2' and method == 'exper':
         return compare_line_pms2
-    elif gene == 'SRGAP2':
+    elif gene == 'SRGAP2' and method == 'exper':
         return compare_line_srgap2
+    elif gene == 'ABCC6' and method == 'qm2':
+        return compare_abcc6_qm2
+    elif gene == 'GTF2I' and method == 'qm2':
+        return compare_gtf2i_qm2
+    elif gene == 'CEL' and method == 'qm2':
+        return compare_cel_qm2
+    elif gene == 'C4A' and method == 'qm2':
+        return compare_c4a_qm2
     else:
         sys.stderr.write(f'Cannot find gene {gene} and method {method}\n')
         exit(1)
 
 
-def compare(b_in, entries, populations, gene, method, out):
+def write_header(chrom, positions, gene, method, out):
     out.write('# {}\n'.format(' '.join(sys.argv)))
+    if method is None:
+        for key, value in sorted(positions.items(), key=operator.itemgetter(1)):
+            out.write('# {:15}   {}:{:,}\n'.format(key, chrom, value))
     out.write('sample\tpopulation\tsuperpopulation\tcopy_num_filter\tcopy_num\tcopy_num_qual\t'
-        'paralog_filter\tparalog_copy_num\tparalog_qual\t'
-        '{}\tb_copy_num\tb_paralog\ttotal_dist\tparalog_dist\n'.format('method' if method != 'none' else 'region'))
+        'paralog_filter\tparalog_copy_num\tparalog_qual\t')
+    if method is None:
+        out.write('region\n')
+    else:
+        out.write('method\tb_copy_num\tb_paralog\ttotal_dist\tparalog_dist\n')
 
-    if method == 'none':
+
+def compare(b_in, entries, populations, gene, method, out):
+    if method is None:
         b_in = list(entries.keys())
-    if gene == 'SMN1' and method == 'qm2':
+    if method == 'qm2':
         b_in = (b_in,)
 
-    compare = select_function(gene, method)
+    compare_fn = select_function(gene, method)
     for line in b_in:
-        for res in compare(line, entries):
+        for res in compare_fn(line, entries):
             res.write_to(out, populations)
 
 
@@ -464,11 +594,12 @@ def main():
     oth_args = parser.add_argument_group('Other arguments')
     oth_args.add_argument('-h', '--help', action='help', help='Show this message and exit.')
     args = parser.parse_args()
-
-    assert args.method == 'none' or args.b is not None
+    assert args.method is None or args.b is not None
 
     populations = load_populations(args.populations)
     chrom, positions = get_positions(args.gene)
+    write_header(chrom, positions, args.gene, args.method, args.output)
+
     entries = {}
     for input in args.a:
         entries.update(load_summary(input, chrom, positions))
