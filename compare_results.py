@@ -129,6 +129,9 @@ def get_positions(gene):
     elif gene == 'CEL':
         chrom = 'chr9'
         pos = { 'exon9': 133_069_200 }
+    elif gene == 'NCF1':
+        chrom = 'chr7'
+        pos = { 'exon7': 74_783_600 }
     else:
         sys.stderr.write(f'Cannot find gene {gene}\n')
         exit(1)
@@ -418,90 +421,50 @@ def compare_line_srgap2(line, entries):
         yield ResEntry(entry, 'FISH', sum(map(float, fish)), tuple(fish))
 
 
-def compare_abcc6_qm2(file, entries):
-    header = next(file).strip().split('\t')
-    p2 = next(file).strip().split('\t')
-    gene = next(file).strip().split('\t')
-    p1 = next(file).strip().split('\t')
-    assert p2[3] == 'ABCC6P2' and gene[3] == 'ABCC6' and p1[3] == 'ABCC6P1'
-
-    for i in range(7, len(header)):
-        sample = header[i]
-        if sample not in entries:
-            continue
-        sample_entries = entries[sample]
-        entry = sample_entries['03-01']
-
-        cn_p2 = float(p2[i])
-        cn_gene = float(gene[i])
-        cn_p1 = float(p1[i])
-        yield ResEntry(entry, 'qm2', cn_p2 + cn_gene + cn_p1, (cn_gene, cn_p2, cn_p1))
-
-
-def compare_gtf2i_qm2(file, entries):
-    header = next(file).strip().split('\t')
-    for line in file:
-        line = line.strip().split('\t')
-        if line[3] == 'GTF2IP4':
-            p4 = line
-        elif line[3] == 'GTF2I':
-            gene = line
-        elif line[3] == 'GTF2IP1':
-            p1 = line
-
-    for i in range(7, len(header)):
-        sample = header[i]
-        if sample not in entries:
-            continue
-        sample_entries = entries[sample]
-        entry = sample_entries['0']
-
-        cn_p4 = float(p4[i])
-        cn_gene = float(gene[i])
-        cn_p1 = float(p1[i])
-        yield ResEntry(entry, 'qm2', cn_p4 + cn_gene + cn_p1, (cn_gene, cn_p4, cn_p1))
+def get_qm2_order(gene):
+    if gene == 'SMN1':
+        return { 'SMN1_middle': ('SMN1', 'SMN2'),
+                 'SMN1_end': ('SMN1', 'SMN2') }
+    elif gene == 'ABCC6':
+        return { '03-01': ('ABCC6', 'ABCC6P2', 'ABCC6P1') }
+    elif gene == 'GTF2I':
+        return { '0': ('GTF2I', 'GTF2IP4', 'GTF2IP1') }
+    elif gene == 'CEL':
+        return { 'exon9': ('CEL', 'CELP') }
+    elif gene == 'C4A':
+        return { 'end': ('C4A', 'C4B') }
+    elif gene == 'NCF1':
+        return { 'exon7': ('NCF1', 'NCF1B', 'NCF1C') }
+    else:
+        sys.stderr.write(f'Cannot find QuicK-mer2 entries for gene {gene}\n')
+        exit(1)
 
 
-def compare_cel_qm2(file, entries):
-    header = next(file).strip().split('\t')
-    for line in file:
-        line = line.strip().split('\t')
-        if line[3] == 'CEL':
-            gene = line
-        elif line[3] == 'CELP':
-            p1 = line
+def compare_qm2(file, gene, entries):
+    order = get_qm2_order(gene)
+    lines = [line.strip().split('\t') for line in file]
+    header = lines[0]
 
-    for i in range(7, len(header)):
-        sample = header[i]
-        if sample not in entries:
-            continue
-        sample_entries = entries[sample]
-        entry = sample_entries['exon9']
+    for region, qm2_names in order.items():
+        qm2_estimates = []
+        for name in qm2_names:
+            for line in lines[1:]:
+                if name == line[3]:
+                    qm2_estimates.append(line)
+                    break
+            else:
+                sys.stderr.write(f'Cannot find QuicK-mer2 entry {name}\n')
+                exit(1)
 
-        cn_gene = float(gene[i])
-        cn_p1 = float(p1[i])
-        yield ResEntry(entry, 'qm2', cn_gene + cn_p1, (cn_gene, cn_p1))
+        for i in range(7, len(header)):
+            sample = header[i]
+            if sample not in entries:
+                continue
+            sample_entries = entries[sample]
+            entry = sample_entries[region]
 
-
-def compare_c4a_qm2(file, entries):
-    header = next(file).strip().split('\t')
-    for line in file:
-        line = line.strip().split('\t')
-        if line[3] == 'C4A':
-            gene_a = line
-        elif line[3] == 'C4B':
-            gene_b = line
-
-    for i in range(7, len(header)):
-        sample = header[i]
-        if sample not in entries:
-            continue
-        sample_entries = entries[sample]
-        entry = sample_entries['end']
-
-        cn1 = float(gene_a[i])
-        cn2 = float(gene_b[i])
-        yield ResEntry(entry, 'qm2', cn1 + cn2, (cn1, cn2))
+            cns = tuple(float(curr_estimates[i]) for curr_estimates in qm2_estimates)
+            yield ResEntry(entry, region, '{:.5f}'.format(sum(cns)), cns)
 
 
 def output_values(sample, entries):
@@ -538,10 +501,6 @@ def select_function(gene, method):
         return compare_abcc6_qm2
     elif gene == 'GTF2I' and method == 'qm2':
         return compare_gtf2i_qm2
-    elif gene == 'CEL' and method == 'qm2':
-        return compare_cel_qm2
-    elif gene == 'C4A' and method == 'qm2':
-        return compare_c4a_qm2
     else:
         sys.stderr.write(f'Cannot find gene {gene} and method {method}\n')
         exit(1)
@@ -554,17 +513,23 @@ def write_header(chrom, positions, gene, method, out):
             out.write('# {:15}   {}:{:,}\n'.format(key, chrom, value))
     out.write('sample\tpopulation\tsuperpopulation\tcopy_num_filter\tcopy_num\tcopy_num_qual\t'
         'paralog_filter\tparalog_copy_num\tparalog_qual\t')
-    if method is None:
-        out.write('region\n')
+    if method is None or method == 'qm2':
+        out.write('region')
     else:
-        out.write('method\tb_copy_num\tb_paralog\ttotal_dist\tparalog_dist\n')
+        out.write('method')
+    if method is not None:
+        out.write('\tb_copy_num\tb_paralog\ttotal_dist\tparalog_dist')
+    out.write('\n')
 
 
 def compare(b_in, entries, populations, gene, method, out):
+    if method == 'qm2':
+        for res in compare_qm2(b_in, gene, entries):
+            res.write_to(out, populations)
+        return
+
     if method is None:
         b_in = list(entries.keys())
-    if method == 'qm2':
-        b_in = (b_in,)
 
     compare_fn = select_function(gene, method)
     for line in b_in:
