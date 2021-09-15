@@ -3,11 +3,13 @@ library(cowplot)
 wdir <- '~/Code/homology-extra/final_plots/'
 source(sprintf('%s/common.r', wdir))
 
-data_dir <- '~/Data/hg38/jvc/comparisons/populations/r009'
-plot_dir <- '~/Data/hg38/jvc/plots/population_comparison/r009/experimental'
+data_dir <- '~/Data/hg38/jvc/comparisons/genes'
+plot_dir <- '~/Data/hg38/jvc/plots/population_comparison/v100/experimental'
 
 abline_color <- 'gray80'
 abline_size <- 1
+
+QUAL <- 20
 
 # ====== SMN1 ======
 
@@ -19,37 +21,80 @@ y_label <- sprintf('%s CN estimate', method)
 df <- load(gene, method_short, keep_qual=T, keep_b=T)
 df <- extend_paralog(df, 2)
 df$method <- sub('caller_', '', df$method)
-df <- add_noise(df, c('copy_num', 'paralog1', 'paralog2', 'b_paralog1', 'b_paralog2'))
+df <- add_noise(df, c('agCN', 'psCN1', 'psCN2', 'b_paralog1', 'b_paralog2'))
 
 obs <- rbind(
-  get_observations(df, 'SMN1 + SMN2 exons 1-6', 'copy_num_noise', 'b_copy_num',
-                   method == '16'),
-  get_observations(df, 'SMN1 exons 7-8', 'paralog1_noise', 'b_paralog1_noise',
-                   method == '78' & paralog_qual1 >= 30),
-  get_observations(df, 'SMN2 exons 7-8', 'paralog2_noise', 'b_paralog2_noise',
-                   method == '78' & paralog_qual1 >= 30)
+  get_observations(df, 'SMN1 + SMN2\nexons 1-6', 'agCN_noise', 'b_copy_num',
+                   method == '16' & agCN_qual >= 30),
+  get_observations(df, 'SMN1\nexons 7-8', 'psCN1_noise', 'b_paralog1_noise',
+                   method == '78' & psCN_filter == 'PASS' & psCN_qual1 >= 30),
+  get_observations(df, 'SMN2\nexons 7-8', 'psCN2_noise', 'b_paralog2_noise',
+                   method == '78' & psCN_filter == 'PASS' & psCN_qual1 >= 30)
 )
+obs$label <- factor(obs$label, levels=unique(obs$label))
 
 (g_smn_c <- ggplot(obs) +
   geom_abline(color = abline_color, size = abline_size) +
-  geom_point(aes(a_obs, b_obs), alpha=0.3) +
+  geom_point(aes(a_obs, b_obs), alpha=0.6, size=0.5) +
   scale_x_continuous('Parascopy CN estimate', breaks=0:20) +
-  scale_y_continuous(bquote(bold(.(method)) ~ 'CN estimate'),
-                     breaks=0:20) +
+  # scale_y_continuous(bquote(bold(.(method)) ~ 'CN estimate'),
+  scale_y_continuous('SMNCopyNumberCaller CN estimate',
+                     breaks=0:20, limits=c(NA, max(obs$b_obs, na.rm=T) + 0.5)) +
   facet_grid(. ~ label, scales='free', space='free') +
-  theme_bw())
+  theme_bw() +
+  theme(axis.title.y = element_text(size=10),
+        strip.text = element_text(margin=margin(2, 0, 2, 0))))
+filter(obs, round(a_obs) != round(b_obs))
+
 ggsave(sprintf('%s/%s.%s.png', plot_dir, gene, method_short), width=12, height=6)
 
-mutate(obs, eq = round(a_obs) == round(b_obs)) %>%
-  select(label, eq) %>% table
+cn_match(df, method == '16')
+cn_match(df, method == '78')
+par_cn_match(df, 2, method == '78')
 
-filter(df, method == '78' & copy_num == round(b_copy_num)) %>%
-  mutate(eq = paralog1 == b_paralog1) %>% count(eq)
+# ------ QM2 ------
 
-filter(df, method == '78' & !is.na(paralog1) & is.na(b_paralog1)) %>% nrow
-filter(df, method == '78' & !is.na(paralog1) & is.na(b_paralog1) &
-       paralog_qual1 >= 30 & paralog_filter == 'PASS') %>% nrow
-filter(df, method == '78' & is.na(paralog1) & !is.na(b_paralog1)) %>% nrow
+gene <- 'SMN1'
+method <- 'QuicK-mer2'; method_short <- 'qm2'
+y_label <- sprintf('%s CN estimate', method)
+df <- load(gene, method_short, keep_qual=T, keep_b=T)
+df <- extend_paralog(df, 2)
+df$region <- sub('SMN1_', '', df$region)
+df <- add_noise(df, c('agCN', 'psCN1', 'psCN2'))
+
+length(unique(df$sample))
+
+obs <- rbind(
+  get_observations(df, 'SMN1 + SMN2\nexons 1-6', 'agCN_noise', 'b_copy_num',
+                   region == 'exon2' & agCN_qual >= QUAL),
+  get_observations(df, 'SMN1\nexons 7-8', 'psCN1_noise', 'b_paralog1',
+                   region == 'exon7' & psCN_filter == 'PASS' & psCN_qual1 >= QUAL),
+  get_observations(df, 'SMN2\nexons 7-8', 'psCN2_noise', 'b_paralog2',
+                   region == 'exon7' & psCN_filter == 'PASS' & psCN_qual1 >= QUAL)
+)
+obs$label <- factor(obs$label, levels=unique(obs$label))
+
+(g_smn_e <- ggplot(obs) +
+    geom_abline(color = abline_color, size = abline_size) +
+    geom_point(aes(a_obs, b_obs), alpha=0.6, size=0.5) +
+    scale_x_continuous('Parascopy CN estimate', breaks=0:20) +
+    scale_y_continuous(y_label,
+                       breaks=0:20, limits=c(NA, max(obs$b_obs, na.rm=T) + 0.5)) +
+    facet_grid(. ~ label, scales='free', space='free') +
+    theme_bw() +
+    theme(axis.title.y = element_text(size=10),
+          strip.text = element_text(margin=margin(2, 0, 2, 0))))
+filter(obs, round(a_obs) != round(b_obs))
+
+plot_grid(g_smn_c, g_smn_e, ncol=1, labels=LETTERS)
+ggsave('~/Tmp/1.png', width=10, height=10, scale=.7, dpi=450)
+
+ggsave(sprintf('%s/%s.%s.png', plot_dir, gene, method_short), width=12, height=6)
+
+cn_match(df, method == '16')
+cn_match(df, method == '78')
+par_cn_match(df, 2, method == '78')
+
 
 # ------ MLPA ------
 
@@ -57,26 +102,33 @@ gene <- 'SMN1'
 method <- 'MLPA'; method_short <- 'mlpa'
 y_label <- sprintf('%s CN estimate', method)
 
+# df <- load(gene, 'old/mlpa', keep_paralog=F, keep_b=T, keep_qual=T)
 df <- load(gene, method_short, keep_paralog=F, keep_b=T, keep_qual=T)
 # For some reasons, some samples have two values in MLPA.
 df <- group_by(df, sample, method) %>% slice_head(n=1) %>% ungroup
 df$method <- sub('mlpa_', '', df$method)
-df <- add_noise(df, c('copy_num'))
+df <- add_noise(df, c('agCN'), 0.02)
 
 obs <- rbind(
-  get_observations(df, 'SMN1 + SMN2 exons 1-6', 'copy_num_noise', 'b_copy_num',
-                   method == '16'),
-  get_observations(df, 'SMN1 + SMN2 exons 7-8', 'copy_num_noise', 'b_copy_num',
-                   method == '78'))
+  get_observations(df, 'Exons 1-6', 'agCN_noise', 'b_copy_num',
+                   method == '16' & agCN_qual >= QUAL),
+  get_observations(df, 'Exons 7-8', 'agCN_noise', 'b_copy_num',
+                   method == '78' & agCN_qual >= QUAL))
+obs$label <- factor(obs$label, levels=unique(obs$label))
 
-(g_smn_d <- ggplot(filter(obs, population != 'BEB' & population != 'TSI')) +
+(g_smn_d <- ggplot(obs) +
   geom_abline(color = abline_color, size = abline_size) +
-  geom_point(aes(a_obs, b_obs), alpha=.3) +
-  scale_x_continuous('Parascopy CN estimate', breaks=0:20) +
-  scale_y_continuous(bquote(bold(.(method)) ~ 'CN estimate'),
-                     breaks=0:20) +
+  geom_point(aes(a_obs, b_obs), alpha=0.6, size=0.5) +
+  scale_x_continuous('Parascopy agCN estimate', breaks=0:20) +
+  # scale_y_continuous(bquote(bold(.(method)) ~ 'CN estimate'),
+  scale_y_continuous('MLPA agCN estimate', breaks=0:20,
+    expand=expansion(add=0.7)) +
   facet_grid(. ~ label, scales='free', space='free') +
-  theme_bw())
+  theme_bw() +
+  theme(strip.text = element_text(margin=margin(2, 0, 2, 0))))
+# sum(with(obs, !is.na(a_obs) & !is.na(b_obs)))
+ggsave('~/Tmp/1.png', width=6, height=3, scale=.85, dpi=600)
+
 ggsave(sprintf('%s/%s.%s.v1.png', plot_dir, gene, method_short), width=10, height=6)
 
 obs$pop2 <- factor(obs$population, levels=c('BEB', 'TSI', 'Other')) %>%
@@ -101,49 +153,35 @@ mutate(obs, eq = round(a_obs) == round(b_obs)) %>%
   filter(population != 'BEB' & population != 'TSI') %>%
   select(label, eq) %>% table
 
-plot_grid(g_smn_a, g_smn_b, g_smn_c, g_smn_d, labels=LETTERS)
+plot_grid(g_smn_a, g_smn_b, g_smn_c, g_smn_d, labels=LETTERS,
+          rel_heights=c(0.6, 0.4), label_y=1.01)
 ggsave('~/Tmp/1.png', width=15, height=8)
 
-# ------ QuicK-mer2 ------
+plot_grid(g_smn_a, g_smn_c, g_smn_b, g_smn_d, labels=c('A', 'C', 'B', 'D'),
+          rel_widths=c(0.7, 0.3), label_y=1.01)
+ggsave('~/Tmp/1.png', width=15, height=8, scale=0.9)
 
-gene <- 'SMN1'
-method <- 'QuicK-mer2'; method_short <- 'qm2'
-y_label <- sprintf('%s CN estimate', method)
+#####
+plot_grid(plot_grid(g_smn_a, g_smn_c, g_smn_d, labels=c('A', 'B', 'C'), nrow=1,
+                    rel_widths=c(1, 0.9, 0.9)),
+          g_smn_b, labels=c('', 'D'), rel_heights=c(0.5, 0.5), nrow=2)
+ggsave('~/Tmp/1.png', width=15, height=9, scale=0.7)
+#####
 
-keep_samples <- local({
-  caller_df <- load(gene, 'caller', keep_paralog=F)
-  caller_df <- select(caller_df, c('sample', 'method', 'copy_num')) %>%
-    pivot_wider(names_from='method', values_from='copy_num')
-  filter(caller_df, caller_16 == caller_78)$sample
-})
+plot_grid(plot_grid(g_smn_a, g_smn_c, g_smn_d, labels=c('A', 'B', 'C'),
+                    ncol=1, rel_heights = c(1.3, 0.8, 0.8), label_y=1.015),
+          g_smn_b, labels=c('', 'D'), rel_widths=c(0.45, 0.55), ncol=2, label_y=1.007)
+ggsave('~/Tmp/1.png', width=15, height=8, scale=1)
 
-df <- load(gene, method_short, keep_paralog=T, keep_b=T, keep_qual=T)
-df <- filter(df, sample %in% keep_samples)
-df <- extend_paralog(df, 2)
-df$method <- sub('qm2_', '', df$method)
-df <- add_noise(df, c('copy_num', 'paralog1', 'paralog2'))
+cn_match(df, method == '16' & population != 'BEB' & population != 'TSI')
+cn_match(df, method == '78' & population != 'BEB' & population != 'TSI')
 
-obs <- rbind(
-  get_observations(df, 'SMN1 + SMN2 Exons 1-6', 'copy_num_noise', 'b_copy_num', T),
-  get_observations(df, 'SMN1 Exons 1-6', 'paralog1_noise', 'b_paralog1', T),
-  get_observations(df, 'SMN2 Exons 1-6', 'paralog2_noise', 'b_paralog2', T)
-)
-
-(g3 <- ggplot(obs) +
-  geom_abline(color = abline_color, size = abline_size) +
-  geom_point(aes(a_obs, b_obs), alpha=.3) +
-  scale_x_continuous('Parascopy CN estimate', breaks=0:20) +
-  scale_y_continuous(bquote(bold(.(method)) ~ 'CN estimate'),
-                     breaks=0:20) +
-  facet_grid(. ~ label, scales='free', space='free') +
-  theme_bw())
-ggsave(sprintf('%s/%s.%s.png', plot_dir, gene, method_short), width=10, height=6)
-
-mutate(obs, eq = round(a_obs) == round(b_obs)) %>%
-  select(label, eq) %>% table
-
-plot_grid(g0, g1, g2, g3, labels=LETTERS)
-ggsave('~/Tmp/1.png', width=15, height=8)
+plot_grid(plot_grid(g_viterbi, g_smn_d, labels=c('A', 'B'), nrow=1,
+                    rel_widths=c(1.2, 1)),
+          g_smn_b, labels=c('', 'C'), rel_heights=c(0.5, 0.5), nrow=2,
+          label_y = 1.05)
+# ggsave('~/Tmp/1.png', width=15, height=9, scale=0.7)
+ggsave('~/Tmp/1.png', width=15, height=9, scale=0.55, dpi=600)
 
 # ====== AMY1C ======
 
@@ -152,11 +190,12 @@ method <- 'qPCR'; method_short <- 'qpcr'
 y_label <- sprintf('CN estimate', method)
 
 df <- load(gene, method_short, keep_paralog=F, keep_b=T, keep_qual=T)
+df <- filter(df, agCN_qual >= QUAL)
 obs <- rbind(
-  # get_observations(df, 'qPCR', 'copy_num', 'b_copy_num', method == 'qPCR'),
-  get_observations(df, 'qPCR', 'copy_num', 'b_copy_num', method == 'qPCR_14'),
-  get_observations(df, 'PRT', 'copy_num', 'b_copy_num', method == 'PRT'),
-  get_observations(df, 'WGS', 'copy_num', 'b_copy_num', method == 'g1k')
+  # get_observations(df, 'qPCR', 'agCN', 'b_copy_num', method == 'qPCR'),
+  get_observations(df, 'qPCR', 'agCN', 'b_copy_num', method == 'qPCR_14'),
+  get_observations(df, 'PRT', 'agCN', 'b_copy_num', method == 'PRT'),
+  get_observations(df, 'WGS', 'agCN', 'b_copy_num', method == 'g1k')
 )
 obs <- filter(obs, !is.na(a_obs) & !is.na(b_obs))
 
@@ -164,17 +203,24 @@ obs_stat <- group_by(obs, label) %>%
   summarize(cor=cor(a_obs, b_obs),
             delta=sum(abs(a_obs - b_obs)) / length(a_obs),
             delta2=sum(abs(b_obs / a_obs - 1)) / length(a_obs))
-obs_stat$text <- with(obs_stat, sprintf(' cor = %.3f\n Δ = %.3f', cor, delta))
+obs_stat$text <- with(obs_stat, sprintf(' r  = %.3f\n Δ = %.3f', cor, delta))
 
 ggplot(obs) +
   geom_abline(color = abline_color, size = abline_size) +
-  geom_point(aes(a_obs, b_obs), alpha=.3) +
+  geom_point(aes(a_obs, b_obs), alpha=.5, size=0.9) +
   geom_text(aes(-Inf, Inf, label=text), data=obs_stat, hjust=0, vjust=1.1) +
-  scale_x_continuous('Parascopy CN estimate', breaks=seq(0, 20, 2)) +
-  scale_y_continuous(y_label, breaks=seq(0, 20, 2)) +
+  scale_x_continuous('Parascopy agCN estimate', breaks=seq(0, 20, 2)) +
+  scale_y_continuous('agCN estimate', breaks=seq(0, 20, 2)) +
   facet_grid(. ~ label, scales='free', space='free') +
   theme_bw()
-ggsave(sprintf('%s/%s.png', plot_dir, gene), width=11, height=6)
+ggsave('~/Tmp/1.png', width=11, height=6, scale=.6, dpi=450)
+
+length(unique(df$sample))
+table(unique(df[c('sample', 'superpopulation')])$superpopulation)
+
+filter(df, agCN == 18)
+
+# cn_match(df, method == 'g1k')
 
 # ====== NPY4R ======
 
@@ -183,12 +229,12 @@ method <- ''; method_short <- 'comp'
 y_label <- 'CN estimate'
 
 df <- load(gene, method_short, keep_paralog=F, keep_b=T, keep_qual=T)
-df <- add_noise(df, 'copy_num', 0.015)
+df <- add_noise(df, 'agCN', 0.015)
 
 obs <- rbind(
-  get_observations(df, 'FREEC', 'copy_num_noise', 'b_copy_num', method == 'FREEC'),
-  get_observations(df, 'CNVnator', 'copy_num_noise', 'b_copy_num', method == 'CNVnator'),
-  get_observations(df, 'ddPCR', 'copy_num_noise', 'b_copy_num', method == 'ddPCR')
+  get_observations(df, 'FREEC', 'agCN_noise', 'b_copy_num', method == 'FREEC'),
+  get_observations(df, 'CNVnator', 'agCN_noise', 'b_copy_num', method == 'CNVnator'),
+  get_observations(df, 'ddPCR', 'agCN_noise', 'b_copy_num', method == 'ddPCR')
 )
 
 ggplot(obs) +
@@ -209,15 +255,17 @@ y_label <- 'CN estimate'
 df <- load(gene, method_short, keep_paralog=T, keep_b=T, keep_qual=T)
 df <- extend_paralog(df, 2)
 df$b_copy_num <- as.numeric(df$b_copy_num)
-df <- add_noise(df, c('copy_num', 'b_copy_num',
-                      'paralog1', 'paralog2', 'b_paralog1', 'b_paralog2'))
+df <- add_noise(df, c('agCN', 'b_copy_num',
+                      'psCN1', 'psCN2', 'b_paralog1', 'b_paralog2'))
+
+# cn_match(df, m)
 
 obs <- rbind(
-  get_observations(df, 'TaqMan', 'copy_num_noise', 'b_copy_num_noise',
+  get_observations(df, 'TaqMan', 'agCN_noise', 'b_copy_num_noise',
                    method == 'TaqMan'),
-  get_observations(df, 'PRT-REDVR', 'copy_num_noise', 'b_copy_num_noise',
+  get_observations(df, 'PRT-REDVR', 'agCN_noise', 'b_copy_num_noise',
                    method == 'PRT_REDVR'),
-  get_observations(df, 'SYBR Green', 'copy_num_noise', 'b_copy_num_noise',
+  get_observations(df, 'SYBR Green', 'agCN_noise', 'b_copy_num_noise',
                    method == 'SYBR_Green')
 )
 
@@ -231,13 +279,13 @@ ggplot(obs) +
   ggtitle('FCGR3A + FCGR3B')
 ggsave(sprintf('%s/%s.a.png', plot_dir, gene), width=10, height=6)
 
-df_filt <- filter(df, paralog_filter == 'PASS' & paralog_qual1 >= 30)
+df_filt <- filter(df, psCN_filter == 'PASS' & psCN_qual1 >= 30)
 obs <- rbind(
-  get_observations(df_filt, 'TaqMan', 'paralog2_noise', 'b_paralog2_noise',
+  get_observations(df_filt, 'TaqMan', 'psCN2_noise', 'b_paralog2_noise',
                    method == 'TaqMan'),
-  get_observations(df_filt, 'PRT-REDVR', 'paralog2_noise', 'b_paralog2_noise',
+  get_observations(df_filt, 'PRT-REDVR', 'psCN2_noise', 'b_paralog2_noise',
                    method == 'PRT_REDVR'),
-  get_observations(df_filt, 'STR', 'paralog2_noise', 'b_paralog2_noise',
+  get_observations(df_filt, 'STR', 'psCN2_noise', 'b_paralog2_noise',
                    method == 'STR')
 )
 
@@ -261,9 +309,9 @@ all_match_pcn <- filter(all_match_pcn, b_paralog2 == 1)$sample
 all_match_pcn <- intersect(all_match_cn, all_match_pcn)
 
 obs <- rbind(
-  get_observations(df, 'FCGR3A + FCGR3B', 'copy_num_noise', 'b_copy_num_noise',
+  get_observations(df, 'FCGR3A + FCGR3B', 'agCN_noise', 'b_copy_num_noise',
                    method == 'TaqMan' & sample %in% all_match_cn),
-  get_observations(df_filt, 'FCGR3B', 'paralog2_noise', 'b_paralog2_noise',
+  get_observations(df_filt, 'FCGR3B', 'psCN2_noise', 'b_paralog2_noise',
                    method == 'TaqMan' & sample %in% all_match_pcn))
 ggplot(obs) +
   geom_abline(color = abline_color, size = abline_size) +
@@ -283,15 +331,15 @@ y_label <- 'CN estimate'
 
 df <- load(gene, method_short, keep_paralog=T, keep_b=T, keep_qual=T)
 df <- extend_paralog(df, 2)
-df <- add_noise(df, c('copy_num', 'b_copy_num',
-                      'paralog1', 'paralog2', 'b_paralog1', 'b_paralog2'))
+df <- add_noise(df, c('agCN', 'b_copy_num',
+                      'psCN1', 'psCN2', 'b_paralog1', 'b_paralog2'))
 
 obs <- rbind(
-  get_observations(df, 'RHD + RHCE', 'copy_num_noise', 'b_copy_num',
+  get_observations(df, 'RHD + RHCE', 'agCN_noise', 'b_copy_num',
                    method == 'WGS'),
-  get_observations(df, 'RHD', 'paralog2_noise', 'b_paralog2',
+  get_observations(df, 'RHD', 'psCN2_noise', 'b_paralog2',
                    method == 'WGS'),
-  get_observations(df, 'RHCE', 'paralog1_noise', 'b_paralog1',
+  get_observations(df, 'RHCE', 'psCN1_noise', 'b_paralog1',
                    method == 'WGS')
 )
 obs$label <- factor(obs$label, levels = unique(obs$label))
@@ -307,11 +355,11 @@ ggplot(obs) +
 ggsave(sprintf('%s/%s.wgs.png', plot_dir, gene), width=10, height=6)
 
 obs <- rbind(
-  get_observations(df, 'RHD + RHCE', 'copy_num_noise', 'b_copy_num_noise',
+  get_observations(df, 'RHD + RHCE', 'agCN_noise', 'b_copy_num_noise',
                    method == 'MIP'),
-  get_observations(df, 'RHD', 'paralog2_noise', 'b_paralog2_noise',
+  get_observations(df, 'RHD', 'psCN2_noise', 'b_paralog2_noise',
                    method == 'MIP'),
-  get_observations(df, 'RHCE', 'paralog1_noise', 'b_paralog1_noise',
+  get_observations(df, 'RHCE', 'psCN1_noise', 'b_paralog1_noise',
                    method == 'MIP')
 )
 obs$label <- factor(obs$label, levels = unique(obs$label))
@@ -326,6 +374,12 @@ ggplot(obs) +
   theme_bw()
 ggsave(sprintf('%s/%s.mip.png', plot_dir, gene), width=10, height=6)
 
+cn_match(df, method == 'MIP')
+par_cn_match(df, 2, method == 'MIP')
+
+cn_match(df, method == 'WGS')
+par_cn_match(df, 2, method == 'WGS')
+
 # ====== SRGAP2 ======
 
 gene <- 'SRGAP2'
@@ -334,20 +388,20 @@ y_label <- 'CN estimate'
 
 df <- load(gene, method_short, keep_paralog=T, keep_b=T, keep_qual=T)
 df <- extend_paralog(df, 4)
-df <- add_noise(df, c('copy_num', 'b_copy_num',
-                      'paralog1', 'paralog2', 'paralog3', 'paralog4',
+df <- add_noise(df, c('agCN', 'b_copy_num',
+                      'psCN1', 'psCN2', 'psCN3', 'psCN4',
                       'b_paralog1', 'b_paralog2', 'b_paralog3', 'b_paralog4'))
 
 obs <- rbind(
-  get_observations(df, 'Aggregate CN', 'copy_num_noise', 'b_copy_num',
+  get_observations(df, 'Aggregate CN', 'agCN_noise', 'b_copy_num',
                    method == 'WGS'),
-  get_observations(df, 'SRGAP2A', 'paralog1_noise', 'b_paralog1',
+  get_observations(df, 'SRGAP2A', 'psCN1_noise', 'b_paralog1',
                    method == 'WGS'),
-  get_observations(df, 'SRGAP2B', 'paralog2_noise', 'b_paralog2',
+  get_observations(df, 'SRGAP2B', 'psCN2_noise', 'b_paralog2',
                    method == 'WGS'),
-  get_observations(df, 'SRGAP2C', 'paralog3_noise', 'b_paralog3',
+  get_observations(df, 'SRGAP2C', 'psCN3_noise', 'b_paralog3',
                    method == 'WGS'),
-  get_observations(df, 'SRGAP2D', 'paralog4_noise', 'b_paralog4',
+  get_observations(df, 'SRGAP2D', 'psCN4_noise', 'b_paralog4',
                    method == 'WGS')
 )
 obs$label2 <- ifelse(grepl('SRGAP', obs$label), 'Paralog-specific CN', 'Total CN')
@@ -363,18 +417,21 @@ ggplot(obs) +
   theme_bw()
 ggsave(sprintf('%s/%s.wgs.png', plot_dir, gene), width=10, height=6)
 
+cn_match(df, method == 'WGS')
+par_cn_match(df, 4, method == 'WGS')
+
 # ------ MIP ------
 
 obs <- rbind(
-  get_observations(df, 'Aggregate CN', 'copy_num_noise', 'b_copy_num_noise',
+  get_observations(df, 'Aggregate CN', 'agCN_noise', 'b_copy_num_noise',
                    method == 'MIP'),
-  get_observations(df, 'SRGAP2A', 'paralog1_noise', 'b_paralog1_noise',
+  get_observations(df, 'SRGAP2A', 'psCN1_noise', 'b_paralog1_noise',
                    method == 'MIP'),
-  get_observations(df, 'SRGAP2B', 'paralog2_noise', 'b_paralog2_noise',
+  get_observations(df, 'SRGAP2B', 'psCN2_noise', 'b_paralog2_noise',
                    method == 'MIP'),
-  get_observations(df, 'SRGAP2C', 'paralog3_noise', 'b_paralog3_noise',
+  get_observations(df, 'SRGAP2C', 'psCN3_noise', 'b_paralog3_noise',
                    method == 'MIP'),
-  get_observations(df, 'SRGAP2D', 'paralog4_noise', 'b_paralog4_noise',
+  get_observations(df, 'SRGAP2D', 'psCN4_noise', 'b_paralog4_noise',
                    method == 'MIP')
 )
 obs$label2 <- ifelse(grepl('SRGAP', obs$label), 'Paralog-specific CN', 'Total CN')
@@ -390,18 +447,21 @@ ggplot(obs) +
   theme_bw()
 ggsave(sprintf('%s/%s.mip.png', plot_dir, gene), width=10, height=6)
 
+cn_match(df, method == 'MIP')
+par_cn_match(df, 4, method == 'MIP')
+
 # ------ FISH ------
 
 obs <- rbind(
-  get_observations(df, 'Aggregate CN', 'copy_num_noise', 'b_copy_num_noise',
+  get_observations(df, 'Aggregate CN', 'agCN_noise', 'b_copy_num_noise',
                    method == 'FISH'),
-  get_observations(df, 'SRGAP2A', 'paralog1_noise', 'b_paralog1_noise',
+  get_observations(df, 'SRGAP2A', 'psCN1_noise', 'b_paralog1_noise',
                    method == 'FISH'),
-  get_observations(df, 'SRGAP2B', 'paralog2_noise', 'b_paralog2_noise',
+  get_observations(df, 'SRGAP2B', 'psCN2_noise', 'b_paralog2_noise',
                    method == 'FISH'),
-  get_observations(df, 'SRGAP2C', 'paralog3_noise', 'b_paralog3_noise',
+  get_observations(df, 'SRGAP2C', 'psCN3_noise', 'b_paralog3_noise',
                    method == 'FISH'),
-  get_observations(df, 'SRGAP2D', 'paralog4_noise', 'b_paralog4_noise',
+  get_observations(df, 'SRGAP2D', 'psCN4_noise', 'b_paralog4_noise',
                    method == 'FISH')
 )
 obs$label2 <- ifelse(grepl('SRGAP', obs$label), 'Paralog-specific CN', 'Total CN')
@@ -416,3 +476,6 @@ ggplot(obs) +
   scale_color_manual('', values = c('gray20', RColorBrewer::brewer.pal(4, 'Set1'))) +
   theme_bw()
 ggsave(sprintf('%s/%s.fish.png', plot_dir, gene), width=10, height=6)
+
+cn_match(df, method == 'FISH')
+par_cn_match(df, 4, method == 'FISH')

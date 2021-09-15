@@ -9,7 +9,7 @@ borders <- c(22 - 0.5, 72 + 0.5)
 filename <- '~/Data/hg38/jvc/depth/han_bgi.1603/window_depth.csv'; tech <- 'bgi'
 filename <- '~/Data/hg38/jvc/depth/g1k_2500.2903/window_depth.subset.csv'; tech <- 'g1k'
 
-sample <- 'HG00428'
+sample <- 'HG00476'
 name <- sprintf('%s_%s', sample, tech)
 
 # ===== Load
@@ -53,16 +53,18 @@ bg_depth_filt <- filter(bg_depth, mean_loess > 0 & !is.na(mean))
             data=filter(bg_depth, gc_content >= borders[1] & gc_content <= borders[2])) +
   geom_line(aes(gc_content, var_loess, color='Variance'), size=0.9,
             data=filter(bg_depth, gc_content >= borders[1] & gc_content <= borders[2])) +
-  geom_point(aes(gc_content, mean, color='Mean'), alpha=.9) +
-  geom_point(aes(gc_content, var, color='Variance'), alpha=.9) +
+  geom_point(aes(gc_content, mean, color='Mean'), alpha=.7, size=1) +
+  geom_point(aes(gc_content, var, color='Variance'), alpha=.7, size=1) +
   scale_x_continuous('GC-content', breaks=seq(0, 100, 10)) +
   scale_y_continuous('Value', limits=c(0, NA)) +
   scale_color_manual(NULL, values=ggthemes::tableau_color_pal()(2)) +
-  guides(alpha=F) +
+  guides(alpha = F, color = guide_legend(override.aes=list(alpha=1))) +
   theme_bw() +
-  theme(legend.position=c(0.5, 1), legend.justification=c('center', 'top'),
-        legend.background=element_blank()))
-ggsave(sprintf('%s/%s.a.png', plots_dir, name), width=8, height=4)
+  theme(legend.position=c(0.5, 1.05),
+        legend.justification=c('center', 'top'),
+        legend.background=element_blank(),
+        legend.key = element_rect(fill='transparent')))
+# ggsave(sprintf('%s/%s.a.png', plots_dir, name), width=8, height=4)
 
 # =======
 
@@ -95,17 +97,18 @@ lik_msg <- sprintf('Negative Binomial: %s \nNormal: %s \nPoisson: %s ',
   geom_histogram(aes(depth1), binwidth=1, fill=ggthemes::tableau_color_pal()(1),
                  alpha=.5) +
   geom_line(aes(x, y, color=dist), data=pred, size=1) +
-  annotate('text', x=Inf, y=Inf, hjust=1, vjust=1.1,
+  annotate('text', x=Inf, y=Inf, hjust=1, vjust=1.1, size=3.5,
            label=lik_msg) +
   scale_x_continuous('Read depth') +
   scale_y_continuous('Number of 100bp windows') +
   scale_color_manual('Distribution',
                      values=RColorBrewer::brewer.pal(8, 'Dark2')) +
-  #values=ggthemes::tableau_color_pal()(10)[c(2, 3, 4)]) +
   theme_bw() +
-  theme(legend.position=c(1, 0.5), legend.justification=c('right', 'center'),
-        legend.background=element_blank()))
-ggsave(sprintf('%s/%s.b.png', plots_dir, name), width=8, height=4)
+  theme(legend.position=c(1, 0.4),
+        legend.justification=c('right', 'center'),
+        legend.background=element_blank(),
+        legend.key = element_rect(fill='transparent')))
+# ggsave(sprintf('%s/%s.b.png', plots_dir, name), width=8, height=4)
 
 ###############################
 
@@ -114,5 +117,4 @@ plot_grid(plots[[sprintf('%s_g1k.a', sample)]],
           plots[[sprintf('%s_g1k.b', sample)]],
           plots[[sprintf('%s_bgi.b', sample)]],
           ncol=2, labels=LETTERS)
-ggsave(sprintf('%s/%s.png', plots_dir, sample), width=14, height=10)
-
+ggsave(sprintf('%s/%s.png', plots_dir, sample), width=14, height=10, scale=.6, dpi=450)

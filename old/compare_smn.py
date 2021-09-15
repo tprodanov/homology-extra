@@ -6,11 +6,29 @@ import argparse
 from enum import Enum
 
 
+def load_file(inp, tool):
+    if tool == 'SMN_caller' or tool == 'MLPA':
+        next(inp)
+        return inp
+    elif tool == 'qm2':
+        samples = next(inp).strip().split('\t')
+        smn2 = next(inp).strip().split('\t')
+        smn1 = next(inp).strip().split('\t')
+        assert samples[3] == 'geneName' and smn2[3] == 'SMN2' and smn1[3] == 'SMN1'
+        samples = samples[11:]
+        smn2_res = smn2[11:]
+        smn1_res = smn1[11:]
+        return map('\t'.join, zip(samples, smn1_res, smn2_res))
+
+    assert False
+
+
 class Result(Enum):
     Match = 0
     Partial = 1
     Mismatch = 2
-ResultPlural = ['Matches', 'Partial', 'Mismatches']
+    Ignore = 3
+ResultPlural = ['Matches', 'Partial', 'Mismatches', 'Ignore']
 
 
 def compare_entries_mlpa(det_line1, det_line2, mlpa_line):
@@ -46,11 +64,27 @@ def compare_entries_smn_caller(det_line1, det_line2, smnc_line):
         return Result.Match
 
 
+def compare_entries_qm2(det_line1, det_line2, qm2_line):
+    smn1, smn2 = map(float, qm2_line[1:])
+    try:
+        det_ploidy1 = tuple(map(int, det_line1[10].split(',')))
+    except ValueError:
+        return Result.Ignore
+
+    if det_ploidy1[0] + det_ploidy1[1] != int(round(smn1 + smn2)):
+        return Result.Mismatch
+    if det_ploidy1[0] != int(round(smn1)) or det_ploidy1[1] != int(round(smn2)):
+        return Result.Partial
+    return Result.Match
+
+
 def compare_entries(det_line1, det_line2, tool_line, tool):
     if tool == 'SMN_caller':
         return compare_entries_smn_caller(det_line1, det_line2, tool_line)
     elif tool == 'MLPA':
         return compare_entries_mlpa(det_line1, det_line2, tool_line)
+    elif tool == 'qm2':
+        return compare_entries_qm2(det_line1, det_line2, tool_line)
     assert False
 
 
@@ -59,6 +93,8 @@ def get_sample(line, tool):
         return line[0].split('.')[0]
     elif tool == 'MLPA':
         return line[2]
+    elif tool == 'qm2':
+        return line[0]
 
 
 def main():
@@ -69,7 +105,7 @@ def main():
     io_args = parser.add_argument_group('Input/output arguments')
     io_args.add_argument('-s', '--summary', type=argparse.FileType(), metavar='<file>', required=True,
         help='Homology tools summary.')
-    io_args.add_argument('-t', '--tool', choices=['MLPA', 'SMN_caller'], required=True,
+    io_args.add_argument('-t', '--tool', choices=['MLPA', 'SMN_caller', 'qm2'], required=True,
         help='Other tool.')
     io_args.add_argument('-r', '--tool-res', type=argparse.FileType(), metavar='<dir>', required=True,
         help='File with another results.')
@@ -99,8 +135,7 @@ def main():
 
     results = [[] for _ in range(len(Result))]
 
-    next(args.tool_res)
-    for line in args.tool_res:
+    for line in  load_file(args.tool_res, args.tool):
         tool_line = line.strip().split('\t')
         sample = get_sample(tool_line, args.tool)
 
@@ -120,7 +155,7 @@ def main():
             len(results[i]) / total * 100))
 
     for i in range(len(Result)):
-        if i == Result.Match.value:
+        if i == Result.Match.value or i == Result.Ignore.value:
             continue
         out.write('\n')
         out.write('{}:\n'.format(ResultPlural[i].upper()))

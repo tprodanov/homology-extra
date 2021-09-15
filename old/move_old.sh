@@ -8,7 +8,7 @@ function try_mv {
     fi
 }
 
-for d in $(ls */summary.bed); do
+for d in $(ls */{summary,res.samples}.bed{,.gz}); do
     d="$(dirname ${d})"
     o="$d/$out"
     if [ -d "$o" ]; then
@@ -20,6 +20,8 @@ for d in $(ls */summary.bed); do
     try_mv "$d/depth" "$o"
     try_mv "$d/paralog_ploidy" "$o"
     try_mv "$d/extra" "$o"
-    mv "$d/summary.bed" "$o"
+    try_mv "$d/summary.bed" "$o"
+    try_mv "$d/res.samples.bed" "$o"
+    try_mv "$d/res.matrix.bed" "$o"
 done
 

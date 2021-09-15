@@ -1,11 +1,11 @@
-suppressMessages(library(dplyr))
 suppressMessages(library(ComplexHeatmap))
 suppressMessages(library(viridis))
 suppressMessages(library(circlize))
 library(RColorBrewer)
-suppressMessages(library(tidyr))
-suppressMessages(library(tibble))
+suppressMessages(library(tidyverse))
 ht_opt$message <- F
+
+RELIABLE_THRESHOLD <- 0.95
 
 colors_to_ramp <- function(colors, min_v=NULL, max_v=NULL, data=NULL) {
   if (is.null(min_v)) {
@@ -18,7 +18,8 @@ colors_to_ramp <- function(colors, min_v=NULL, max_v=NULL, data=NULL) {
   colorRamp2(seq(min_v, max_v, length = n), colors)
 }
 
-draw_matrices <- function(region_name, sample_gts, sample_psv_support, likelihoods,
+draw_matrices <- function(region_name, sample_gts, sample_psv_gts,
+                          sample_psv_support, likelihoods,
                           f_values, out_prefix, important_samples=c()) {
   start_time <- proc.time()['elapsed']
   region_group = likelihoods$region_group[1]
@@ -51,28 +52,25 @@ draw_matrices <- function(region_name, sample_gts, sample_psv_support, likelihoo
   best_gt_probs <- 10 ^ best_gt_probs
   names(best_gt_probs) <- samples
 
-  # Extract best PSV genotypes and probabilities.
-  stopifnot(all(sample_psv_support$region_group == region_group))
-  sample_psv_support <- select(sample_psv_support, 2:3, all_of(samples))
-  sample_psv_support <- sample_psv_support[
-    rowSums(is.na(sample_psv_support[samples])) < n_samples,]
-  psvs <- unique(sample_psv_support$psv)
+  # Extract best PSV genotypes.
+  stopifnot(all(sample_psv_gts$region_group == region_group))
+  sample_psv_gts$region_group <- NULL
+  sample_psv_gts <- column_to_rownames(sample_psv_gts, 'psv') %>% as.matrix
+  psvs <- rownames(sample_psv_gts)
   n_psvs <- length(psvs)
   if (n_psvs == 0) {
     cat(sprintf('[%s: %s] No PSVs present.\n', region_name, region_group))
     return()
   }
+  psv_best_gts <- sample_psv_gts[, samples, drop=F]
+  
+  # Transform PSV sample concordance.
+  stopifnot(all(sample_psv_support$region_group == region_group))
+  sample_psv_support <- select(sample_psv_support, 2:3, all_of(samples))
+  sample_psv_support <- sample_psv_support[
+    rowSums(is.na(sample_psv_support[samples])) < n_samples,]
   psv_support_long <- pivot_longer(sample_psv_support, all_of(samples),
                                    names_to='sample', values_to='prob')
-  
-  # Best PSV genotypes.
-  psv_best_gts <- aggregate(prob ~ psv + sample, psv_support_long, FUN=which.max)
-  psv_best_gts$gt <- all_gts[psv_best_gts$prob]
-  psv_best_gts$prob <- NULL
-  psv_best_gts <- pivot_wider(psv_best_gts, names_from='sample', values_from='gt')
-  psv_best_gts <- psv_best_gts[match(psvs, psv_best_gts$psv),]
-  psv_best_gts <- column_to_rownames(psv_best_gts, 'psv') %>% as.matrix
-  psv_best_gts <- psv_best_gts[psvs, , drop=F][, samples, drop=F]
   
   # Support for the best sample genotypes.
   psv_support_best <- psv_support_long[
@@ -100,7 +98,6 @@ draw_matrices <- function(region_name, sample_gts, sample_psv_support, likelihoo
   rownames(f_values) <- NULL
   f_values <- column_to_rownames(f_values, 'psv')
   f_matrix <- select(f_values, starts_with('copy')) %>% as.matrix
-  colnames(f_matrix)
   colnames(f_matrix) <- paste('Copy', 1:ncol(f_matrix))
   
   # Sample annotation.
@@ -119,14 +116,18 @@ draw_matrices <- function(region_name, sample_gts, sample_psv_support, likelihoo
     which = 'column')
   
   # PSV annotation.
+  reliable_psvs <- rowSums(f_matrix < RELIABLE_THRESHOLD) == 0
   psv_colors <- colorRamp2(c(0, 0.5, 1), c('red', 'white', 'blue'))
+  white_colors <- colorRamp2(c(0, 1), c('white', 'white'))
   psv_annot <- HeatmapAnnotation(
+    Reliable = anno_simple(rep(0, n_psvs),
+                           pch=ifelse(reliable_psvs, '*', NA),
+                           col=white_colors),
     Weight = f_matrix, col = list('Weight' = zero_one_colors),
     which = 'row', show_annotation_name=T)
-  
+
   # Additional information.
-  reliable_psvs <- which(rowSums(f_matrix < 0.8) == 0)
-  n_reliable <- length(reliable_psvs)
+  n_reliable <- sum(reliable_psvs)
   info <- sprintf('Cluster %d,  likelihood %.3f,  %s iterations,  %d/%d reliable PSVs.',
                   best_cluster, last_likelihood, last_iteration, n_reliable, n_psvs)
 

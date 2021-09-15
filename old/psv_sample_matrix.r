@@ -5,7 +5,7 @@ pdf(NULL)
 source('~/Code/homology-extra/psv_sample_matrix_inner.r')
 
 if (length(args) == 0) {
-  data_dir <- '~/Data/hg38/jvc/runs/033.GWD/./TTN/extra'
+  data_dir <- '~/Data/hg38/jvc/runs/201.han_g1k/./SMN1/extra'
   plots_dir <- '~/Tmp'
   important_samples <- c()
 } else {
@@ -37,7 +37,8 @@ load <- function(name, comment.char='#', ...) {
 
 all_sample_gts <- load('em_sample_gts')
 all_likelihoods <- load('em_likelihoods')
-all_f_values <- load('em_psv_f_values')
+all_f_values <- load('em_interm_f_values')
+all_sample_psv_gts <- load('em_sample_psv_gts')
 all_sample_psv_support <- load('em_sample_psv_support')
 
 region_groups <- unique(all_likelihoods$region_group)
@@ -45,10 +46,11 @@ for (group in region_groups) {
   sample_gts <- filter(all_sample_gts, region_group == group)
   likelihoods <- filter(all_likelihoods, region_group == group)
   f_values <- filter(all_f_values, region_group == group)
+  sample_psv_gts <- filter(all_sample_psv_gts, region_group == group)
   sample_psv_support <- filter(all_sample_psv_support, region_group == group)
   out_prefix <- sprintf('%s%s.', plots_prefix, group)
   
-  tryCatch(draw_matrices(region_name, sample_gts, sample_psv_support,
+  tryCatch(draw_matrices(region_name, sample_gts, sample_psv_gts, sample_psv_support,
                          likelihoods, f_values, out_prefix, important_samples),
            error = function(e) {
              cat(sprintf('!!!\n[%s: %s] Could not finish: %s\n!!!\n', region_name, group, e))

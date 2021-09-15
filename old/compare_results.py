@@ -7,6 +7,8 @@ import collections
 import csv
 import operator
 
+from summarize_results import dget
+
 
 class SummaryEntry:
     def __init__(self, row):
@@ -16,13 +18,13 @@ class SummaryEntry:
         self.end = int(row['end'])
         self.sample = row['sample']
 
-        self.filter = row['copy_num_filter']
-        self.copy_num = row['copy_num']
-        self.qual = row['copy_num_qual']
+        self.filter = dget(row, 'copy_num_filter', 'agCN_filter')
+        self.copy_num = dget(row, 'copy_num', 'agCN')
+        self.qual = dget(row, 'copy_num_qual', 'agCN_qual')
 
-        self.paralog_filter = row['paralog_filter']
-        self.paralog_copy_num = row['paralog_copy_num']
-        self.paralog_qual = row['paralog_qual']
+        self.paralog_filter = dget(row, 'paralog_filter', 'psCN_filter')
+        self.paralog_copy_num = dget(row, 'paralog_copy_num', 'psCN')
+        self.paralog_qual = dget(row, 'paralog_qual', 'psCN_qual')
 
     def covers(self, chrom, pos):
         return self.chrom == chrom and self.start <= pos <= self.end
@@ -105,24 +107,25 @@ def get_positions(gene):
         pos = { 'gene_start': 43_600_000,
                 '02-01': 43_580_000,
                 '02-02': 43_610_000,
-                '02-03': 43_629_000 }
+                '02-03': 43_629_000,
+                'exon10': 43_604_748 }
     elif gene == 'NEB':
         chrom = 'chr2'
-        pos = { 'middle': 151_584_000 }
+        pos = { 'exon101': 151_583_700 }
     elif gene == 'GTF2I':
         chrom = 'chr7'
-        pos = { '0': 74_750_000 }
+        pos = { 'exon26': 74_749_400 }
     elif gene == 'APOBEC3A':
         chrom = 'chr22'
         pos = { 'exon4': 38_961_500 }
     elif gene == 'ABCC6':
         chrom = 'chr16'
         pos = {
-            '02-01': 16_210_000,
-            '03-01': 16_220_000 }
+            'exon7': 16_208_800,
+            'exon2': 16_221_700 }
     elif gene == 'OTOA':
         chrom = 'chr16'
-        pos = { '0': 21_750_000 }
+        pos = { 'exon25': 21_752_000 }
     elif gene == 'HYDIN':
         chrom = 'chr16'
         pos = { 'exon18': 71_060_550 }
@@ -132,6 +135,15 @@ def get_positions(gene):
     elif gene == 'NCF1':
         chrom = 'chr7'
         pos = { 'exon7': 74_783_600 }
+    elif gene == 'ASAH2':
+        chrom = 'chr10'
+        pos = { 'exon21': 50_189_500 }
+    elif gene == 'SAA1':
+        chrom = 'chr11'
+        pos = { 'exon2': 18_266_900 }
+    elif gene == 'ZP3':
+        chrom = 'chr7'
+        pos = { 'exon7': 76_440_300 }
     else:
         sys.stderr.write(f'Cannot find gene {gene}\n')
         exit(1)
@@ -223,10 +235,10 @@ class ResEntry:
                 if self.b_paralog is not None else '*'
             out.write('\t{}\t{}'.format(b_copy_num_str, b_paralog_str))
 
-            if not entry_is_str:
-                copy_num_dist = total_copy_num_distance(entry, self.b_copy_num)
-                paralog_dist = paralog_copy_num_distance(entry, self.b_paralog)
-                out.write('\t{:.4g}\t{:.4g}'.format(copy_num_dist, paralog_dist))
+            # if not entry_is_str:
+            #     copy_num_dist = total_copy_num_distance(entry, self.b_copy_num)
+            #     paralog_dist = paralog_copy_num_distance(entry, self.b_paralog)
+            #     out.write('\t{:.4g}\t{:.4g}'.format(copy_num_dist, paralog_dist))
         out.write('\n')
 
 
@@ -498,6 +510,46 @@ def get_qm2_pos(gene):
             QmPos(reg_chrom, reg_pos['exon18'], 'exon18', 0),
             QmPos('chr1', 146_650_405, 'exon18', 1),
         ]
+    elif gene == 'ABCC6':
+        return [
+            QmPos(reg_chrom, reg_pos['exon7'], 'exon7', 0),
+            QmPos('chr16', 18_585_865, 'exon7', 1),
+            QmPos(reg_chrom, reg_pos['exon2'], 'exon2', 0),
+            QmPos('chr16', 14_822_937, 'exon2', 1),
+            QmPos('chr16', 18_573_008, 'exon2', 2),
+        ]
+    elif gene == 'GTF2I':
+        return [
+            QmPos(reg_chrom, reg_pos['exon26'], 'exon26', 0),
+            QmPos('chr7', 73_196_011, 'exon26', 1), # P4
+            QmPos('chr7', 75_196_664, 'exon26', 2), # P1
+        ]
+    elif gene == 'CEL':
+        return [
+            QmPos(reg_chrom, reg_pos['exon9'], 'exon9', 0),
+            QmPos('chr9', 133_084_984, 'exon9', 1),
+        ]
+    elif gene == 'NCF1':
+        return [
+            QmPos(reg_chrom, reg_pos['exon7'], 'exon7', 0),
+            QmPos('chr7', 73_230_228, 'exon7', 1),
+            QmPos('chr7', 75_162_358, 'exon7', 2),
+        ]
+    elif gene == 'ASAH2':
+        return [
+            QmPos(reg_chrom, reg_pos['exon21'], 'exon21', 0),
+            QmPos('chr10', 50_752_555, 'exon21', 1),
+        ]
+    elif gene == 'SAA1':
+        return [
+            QmPos(reg_chrom, reg_pos['exon2'], 'exon2', 0),
+            QmPos('chr11', 18_247_999, 'exon2', 1),
+        ]
+    elif gene == 'ZP3':
+        return [
+            QmPos(reg_chrom, reg_pos['exon7'], 'exon7', 0),
+            QmPos('chr7', 76_611_763, 'exon7', 1),
+        ]
     else:
         sys.stderr.write(f'Cannot find QuicK-mer2 entries for gene {gene}\n')
         exit(1)
@@ -540,7 +592,8 @@ def compare_qm2(file, gene, entries):
             if gene == 'SRGAP2' and not isinstance(entry, str):
                 entry.paralog_copy_num = _reorder_srgap2(entry.paralog_copy_num)
                 entry.paralog_qual = _reorder_srgap2(entry.paralog_qual)
-            yield ResEntry(entry, region, '{:.5f}'.format(sum(qm2_cns)), qm2_cns)
+            qm2_ag_cn = sum(filter(bool, qm2_cns))
+            yield ResEntry(entry, region, '{:.5f}'.format(qm2_ag_cn), qm2_cns)
 
 
 def output_values(sample, entries):
@@ -586,14 +639,14 @@ def write_header(chrom, positions, gene, method, out):
     if method is None:
         for key, value in sorted(positions.items(), key=operator.itemgetter(1)):
             out.write('# {:15}   {}:{:,}\n'.format(key, chrom, value))
-    out.write('sample\tpopulation\tsuperpopulation\tcopy_num_filter\tcopy_num\tcopy_num_qual\t'
-        'paralog_filter\tparalog_copy_num\tparalog_qual\t')
+    out.write('sample\tpopulation\tsuperpopulation\tagCN_filter\tagCN\tagCN_qual\t'
+        'psCN_filter\tpsCN\tpsCN_qual\t')
     if method is None or method.startswith('qm2-'):
         out.write('region')
     else:
         out.write('method')
     if method is not None:
-        out.write('\tb_copy_num\tb_paralog\ttotal_dist\tparalog_dist')
+        out.write('\tb_copy_num\tb_paralog')
     out.write('\n')
 
 
