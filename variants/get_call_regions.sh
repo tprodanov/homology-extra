@@ -10,20 +10,20 @@ function fmt-len() {
 
 set -eu
 
-input="$1"
+wdir="$1"
 genome_dir="$2"
-output="$3"
 
 genome="$genome_dir/genome.fa"
 gen_fai="$genome_dir/genome.fa.fai"
 table="$genome_dir/homology/table.bed.gz"
 
-mkdir -p "$output"
-out_file="$output/calling.bed"
+out_dir="$wdir/calls"
+mkdir -p "$out_dir"
+out_file="$out_dir/calling.bed"
 
 echo "Writing regions for variant calling to     ...     $out_file"
 
-zgrep -v '^#' "$input/res.samples.bed.gz" | \
+zgrep -v '^#' "$wdir/parascopy/res.samples.bed.gz" | \
     awk 'BEGIN{ FS="\t"; OFS="\t" }
     {
         print $1,$2,$3;

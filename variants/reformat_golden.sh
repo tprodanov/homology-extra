@@ -2,8 +2,12 @@
 
 set -eu
 
-dir="$1"
-regions="$2/calling.bed"
+if [[ $# -ge 1 ]]; then
+    dir="$1"
+else
+    dir="."
+fi
+regions="$dir/calls/calling.bed"
 
 a="$dir/golden.vcf.gz"
 b="$dir/golden_tmp.vcf.gz"
