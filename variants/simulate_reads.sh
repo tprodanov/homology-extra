@@ -2,7 +2,8 @@
 
 set -eu
 
-script="gen_reads.py"
+# script="gen_reads.py"
+script="/home/timofey/Code/NEAT/gen_reads.py"
 out="$1"
 genome="$2"
 
@@ -24,3 +25,4 @@ rename "_" "" "$out/_"*
 
 echo
 "$(dirname "$0")"/bwa_wrap.sh "$out/" "$genome"
+
