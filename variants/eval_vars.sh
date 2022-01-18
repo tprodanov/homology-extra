@@ -3,35 +3,69 @@
 set -eu
 
 wdir="$(dirname "$0")"
-genome_sdf="$1"
 
-if [[ $# -ge 2 ]]; then
-    dir="$2"
-else
-    dir="."
-fi
+USAGE="$(cat <<-END
+Evaluate diploid genotypes.
+    -i <dir>,   --input <dir>
+        Input directory. Must contain golden_phased.vcf.gz and bwa.bam.
+    -p <dir>,   --parascopy <dir>
+        Parascopy directory.
+    -g <file>,  --golden <file>
+        Golden VCF file.
+    -o <dir>,   --output <dir>
+        Output directory. Must contain calling.bed file.
+    -f <file>,   --fasta-ref <file>
+        Fasta reference. Must contain <file>.sdf index.
+END
+)"
 
-if [[ $# -ge 3 ]]; then
-    subdir="${dir}/$3"
-else
-    subdir="${dir}/calls"
-fi
+while (( "$#" )); do
+    case "$1" in
+        -i|--input)
+            input="$2"
+            shift 2
+            ;;
+        -p|--parascopy)
+            par_dir="$2"
+            shift 2
+            ;;
+        -o|--output)
+            output="$2"
+            shift 2
+            ;;
+        -f|--fasta-ref)
+            genome="$2"
+            shift 2
+            ;;
+        -h|--help)
+            echo "${USAGE}"
+            exit 0
+            ;;
+        *)
+            echo "Error: Unexpected argument $1" >&2
+            exit 1
+            ;;
+    esac
+done
 
-var_dir="$(dirname $(ls ${dir}/parascopy/*/variants.vcf.gz | head -1))"
+par_dir="$(dirname $(ls ${par_dir}/**/variants.vcf.gz | head -1))"
 
-bcftools view -T ${subdir}/calling.bed -i'GQ >= 0' ${var_dir}/variants.vcf.gz | bgzip > ${subdir}/parascopy.vcf.gz
-tabix -p vcf ${subdir}/parascopy.vcf.gz
+rm -f ${output}/{parascopy,golden}.vcf.gz{,.tbi}
+rtg vcffilter --include-bed=${output}/calling.bed -i ${input}/golden_phased.vcf.gz -o ${output}/golden.vcf.gz
+rtg vcffilter --include-bed=${output}/calling.bed -i ${par_dir}/variants.vcf.gz -o ${output}/parascopy.vcf.gz
 
-if ! [[ -f ${dir}/golden_phased.vcf.gz ]]; then
-    ${wdir}/reformat_golden.sh ${dir}
-fi
-bcftools view -T ${subdir}/calling.bed golden_phased.vcf.gz | bgzip > ${subdir}/golden.vcf.gz
-tabix -p vcf ${subdir}/golden.vcf.gz
+~/Code/freebayes/build/freebayes -f ${genome} -t ${output}/calling.bed --genotype-qualities ${input}/bwa.bam | \
+    bgzip > ${output}/freebayes.vcf.gz
+tabix -p vcf ${output}/freebayes.vcf.gz
+~/Code/gatk-4.2.2.0/gatk HaplotypeCaller -I ${input}/bwa.bam -R ${genome} \
+    -L ${output}/calling.bed -O ${output}/gatk.vcf.gz
 
-cd ${subdir}
-rm -rf eval-*
-rtg vcfeval -b golden.vcf.gz -c freebayes.vcf.gz -t ~/Data/hg38/genome/genome.fa.sdf -o eval-fb > /dev/null
-rtg vcfeval -b golden.vcf.gz -c gatk.vcf.gz -t ~/Data/hg38/genome/genome.fa.sdf -o eval-gatk > /dev/null
-rtg vcfeval -b golden.vcf.gz -c parascopy.vcf.gz -t ~/Data/hg38/genome/genome.fa.sdf -o eval-paras > /dev/null
+rm -rf ${output}/eval-{fb,gatk,paras}
+rtg vcfeval -b ${output}/golden.vcf.gz -c ${output}/freebayes.vcf.gz \
+    -t ${genome}.sdf -o ${output}/eval-fb > /dev/null
+rtg vcfeval -b ${output}/golden.vcf.gz -c ${output}/gatk.vcf.gz \
+    -t ${genome}.sdf -o ${output}/eval-gatk > /dev/null
+rtg vcfeval -b ${output}/golden.vcf.gz -c ${output}/parascopy.vcf.gz \
+    -t ${genome}.sdf -o ${output}/eval-paras > /dev/null
 
-${wdir}/write_summary.py eval-*
+${wdir}/write_summary.py ${output}/eval-{fb,gatk,paras}

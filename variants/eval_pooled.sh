@@ -1,98 +1,92 @@
 #!/bin/bash
 
 set -eu
-
 wdir="$(dirname "$0")"
-genome_sdf="$1"
 
-if [[ $# -ge 2 ]]; then
-    dir="$2"
-else
-    dir="."
-fi
+USAGE="$(cat <<-END
+Evaluate pooled genotypes.
+    -p <dir>,   --parascopy  <dir>
+        Parascopy directory.
+    -o <dir>,   --output <dir>
+        Output directory.
+    -f <file>,   --fasta-ref <file>
+        Fasta reference. Must contain <file>.sdf index.
+    --padding <int>
+        Padding around the golden variants with unexpected copy number [default: 5]
+END
+)"
 
-if [[ $# -ge 3 ]]; then
-    subdir="${dir}/$3"
-else
-    subdir="${dir}/calls"
-fi
+padding=5
 
-var_dir="$(dirname $(ls ${dir}/parascopy/*/variants_pooled.vcf.gz | head -1))"
+while (( "$#" )); do
+    case "$1" in
+        -p|--parascopy)
+            input="$2"
+            shift 2
+            ;;
+        -o|--output)
+            output="$2"
+            shift 2
+            ;;
+        -f|--fasta-ref)
+            genome="$2"
+            shift 2
+            ;;
+        --padding)
+            padding="$2"
+            shift 2
+            ;;
+        -h|--help)
+            echo "${USAGE}"
+            exit 0
+            ;;
+        *)
+            echo "Error: Unexpected argument $1" >&2
+            exit 1
+            ;;
+    esac
+done
 
-zcat ${var_dir}/variants_pooled.vcf.gz | python <( echo '
-import sys
-for line in map(str.strip, sys.stdin):
-    if "=GQ," in line:
-        print(line)
-        print("##FORMAT=<ID=GQ2,Number=1,Type=Float,Description=\"Genotype Quality OR 0 if GTfilter\">")
-    elif line.startswith("#"):
-        print(line)
-    else:
-        line = line.split("\t")
-        line[8] += ":GQ2"
-        if "GTfilter" in line[8]:
-            line[9] += ":0"
-        else:
-            i = line[8].split(":").index("GQ")
-            line[9] += ":" + line[9].split(":")[i]
-        print("\t".join(line))
-' ) | bgzip > ${var_dir}/variants_pooled2.vcf.gz
-tabix -p vcf ${var_dir}/variants_pooled2.vcf.gz
+input="$(dirname $(ls ${input}/**/variants_pooled.vcf.gz | head -1))"
 
-function write_summary() {
-    zcat "$1" | python <( echo '
-import sys
-print("Threshold  True-pos-baseline  True-pos-call  False-pos  False-neg  Precision  Sensitivity  F-measure")
-print("----------------------------------------------------------------------------------------------------")
-for line in map(str.strip, sys.stdin):
-    line = line.split("\t")
-    if line[1] ==
-' )
-}
-
-readarray -t cns < <(zgrep -v '^#' ${dir}/parascopy/res.matrix.bed.gz | cut -f5 | sort -n | uniq)
-subdir2=${subdir}/pooled
-rm -rf ${subdir2}
-mkdir -p ${subdir2}
-
-PADDING=5
+readarray -t cns < <(zgrep -v '^#' ${input}/res.matrix.bed.gz | cut -f5 | sort -n | uniq)
+mkdir -p ${output}
 
 for cn in "${cns[@]}"; do
     echo -e "=== Reference CN ${cn} ==="
-    zgrep -v '^#' ${dir}/parascopy/res.matrix.bed.gz | awk -v cn=${cn} '$5 == cn' | cut -f1-3 | \
-        bedtools merge -i - | \
-        bedtools intersect -a - -b ${subdir}/calling.bed > ${subdir2}/calling_${cn}.bed
+    zgrep -v '^#' ${input}/res.matrix.bed.gz | awk -v cn=${cn} '$5 == cn' | cut -f1-3 | \
+        bedtools merge -i - > ${output}/calling_${cn}.bed
 
     echo -e "\n=== Filtering golden VCF ==="
-    rtg vcffilter --include-bed=${subdir2}/calling_${cn}.bed -i golden_pooled.vcf.gz -o ${subdir2}/golden_${cn}.vcf.gz
-    zgrep -v '^#' ${subdir2}/golden_${cn}.vcf.gz | \
-        awk -v cn=${cn} -v padd=${PADDING} 'BEGIN {OFS="\t"} {
-            split($10, a, "|"); if (length(a) != cn) { print $1, $2 - padd - 1, $2 + length($3) + padd - 1 }
-        }' > ${subdir2}/exclude_${cn}.bed
+    rm -f ${output}/golden_${cn}.vcf.gz{,.tbi}
+    rtg vcffilter --include-bed=${output}/calling_${cn}.bed -i golden_pooled.vcf.gz -o ${output}/golden_${cn}.vcf.gz
+    zgrep -v '^#' ${output}/golden_${cn}.vcf.gz | \
+        awk -v cn=${cn} -v padding=${padding} 'BEGIN {OFS="\t"} {
+            split($10, a, "|"); if (length(a) != cn) { print $1, $2 - padding - 1, $2 + length($3) + padding - 1 }
+        }' > ${output}/exclude_${cn}.bed
 
     echo -e "\n=== Filtering variants VCF ==="
-    rtg vcffilter --include-bed=${subdir2}/calling_${cn}.bed --exclude-bed=${subdir2}/exclude_${cn}.bed \
-        -i ${var_dir}/variants_pooled2.vcf.gz -o ${subdir2}/parascopy_${cn}.vcf.gz
+    rm -f ${output}/parascopy_${cn}.vcf.gz{,.tbi}
+    rtg vcffilter --include-bed=${output}/calling_${cn}.bed --exclude-bed=${output}/exclude_${cn}.bed \
+        -i ${input}/variants_pooled.vcf.gz -o ${output}/parascopy_${cn}.vcf.gz
 
-    rm -rf ${subdir2}/eval-${cn}
+    rm -rf ${output}/eval-${cn}
     rtg vcfeval \
-        -b ${subdir2}/golden_${cn}.vcf.gz \
-        -c ${subdir2}/parascopy_${cn}.vcf.gz \
-        -t ${genome_sdf} \
-        -o ${subdir2}/eval-${cn} \
-        -f GQ2 \
+        -b ${output}/golden_${cn}.vcf.gz \
+        -c ${output}/parascopy_${cn}.vcf.gz \
+        -t ${genome}.sdf \
+        -o ${output}/eval-${cn} \
         --sample-ploidy=${cn} > /dev/null
 
-    rm -rf ${subdir2}/eval-${cn}-squash
+    rm -rf ${output}/eval-${cn}-squash
     rtg vcfeval \
-        -b ${subdir2}/golden_${cn}.vcf.gz \
-        -c ${subdir2}/parascopy_${cn}.vcf.gz \
-        -t ${genome_sdf} \
-        -o ${subdir2}/eval-${cn}-squash \
-        -f GQ2 \
+        -b ${output}/golden_${cn}.vcf.gz \
+        -c ${output}/parascopy_${cn}.vcf.gz \
+        -t ${genome}.sdf \
+        -o ${output}/eval-${cn}-squash \
         --squash-ploidy \
         --sample-ploidy=${cn} > /dev/null
     echo
 done
 
-${wdir}/write_summary.py ${subdir2}/eval-*
+${wdir}/write_summary.py ${output}/eval-*

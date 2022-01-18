@@ -3,14 +3,15 @@
 set -eu
 
 if [[ $# -ge 1 ]]; then
-    dir="$1"
+    golden="$1"
 else
-    dir="."
+    golden="golden.vcf.gz"
 fi
 
-a="$dir/golden.vcf.gz"
-b="$dir/golden_phased.vcf.gz"
+out_golden="$(echo ${golden} | sed s/\.vcf\.gz/_phased.vcf.gz/)"
+echo "Reformating golden VCF file: ${golden} -> ${out_golden}"
 
-zcat "$a" | sed 's/INFO$/INFO\tFORMAT\tsim/; s,WP=\([0-9]\+\)/\([0-9]\+\),.\tGT\t\1|\2,;
-    s/#CHROM/##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">\n#CHROM/' | bgzip > "$b"
-tabix -p vcf "$b"
+zcat "$golden" | grep -v "ID=WP," | \
+    sed 's/INFO$/INFO\tFORMAT\tsim/; s,WP=\([0-9]\+\)/\([0-9]\+\),.\tGT\t\1|\2,;
+        s/#CHROM/##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">\n#CHROM/' | bgzip > "$out_golden"
+tabix -p vcf "$out_golden"
