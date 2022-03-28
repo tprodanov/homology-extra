@@ -1,15 +1,15 @@
 #!/bin/awk -f
 
 FNR == 1 {
-    print "Analyzing file", FILENAME > "/dev/tty"
+    printf "[%s] Analyzing file %s\n", strftime("%H:%M:%S"), FILENAME > "/dev/tty"
     n = split(FILENAME, filename_split, "/")
     basename = filename_split[n]
     m = split(basename, basename_split, ".")
-    suffix = basename_split[1]"."basename_split[2]
+    replacement = ":"basename_split[1]"."basename_split[2]"\\1"
 }
 {
-    if (NR % 4 == 1)
-        print $0":"suffix
-    else
-        print $0
+    if (NR % 4 == 1) {
+        $0 = gensub(/((\/[12])?)$/, replacement, 1)
+    }
+    print
 }

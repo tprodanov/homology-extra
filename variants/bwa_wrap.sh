@@ -82,8 +82,8 @@ echo "Indexing alignments"
 samtools index -@ ${threads} ${out_prefix}.bwa.bam
 rm ${out_prefix}.unsort.sam
 
-echo "Compressing reads back"
 if [[ ${compress} = true ]]; then
+    echo "Compressing reads back"
     pigz -p ${threads} ${in_prefix}{1,2}.fq
 fi
 
