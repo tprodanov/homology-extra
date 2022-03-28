@@ -60,9 +60,11 @@ while (( "$#" )); do
     esac
 done
 
+compress=false
 if [[ -f ${in_prefix}1.fq.gz ]]; then
     echo "Decompressing reads"
     pigz -d -p ${threads} ${in_prefix}{1,2}.fq.gz
+    compress=true
 fi
 
 echo "Aligning reads"
@@ -70,7 +72,7 @@ if [ -z ${sample} ]; then
     bwa mem ${fasta} -R "@RG\tID:${sample}\tSM:${sample}" \
         ${in_prefix}{1,2}.fq -t ${threads} > ${out_prefix}.unsort.sam
 else
-    bwa mem ${fasta} ${in_prefix}read{1,2}.fq -t ${threads} > ${out_prefix}.unsort.sam
+    bwa mem ${fasta} ${in_prefix}{1,2}.fq -t ${threads} > ${out_prefix}.unsort.sam
 fi
 
 echo "Sorting alignments"
@@ -81,6 +83,8 @@ samtools index -@ ${threads} ${out_prefix}.bwa.bam
 rm ${out_prefix}.unsort.sam
 
 echo "Compressing reads back"
-pigz -p ${threads} ${in_prefix}{1,2}.fq
+if [[ ${compress} = true ]]; then
+    pigz -p ${threads} ${in_prefix}{1,2}.fq
+fi
 
 echo "Success"

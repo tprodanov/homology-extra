@@ -140,7 +140,7 @@ def main():
         alns = [pysam.AlignmentFile(filename, reference_filename=args.fasta, require_index=True)
             for filename in args.input]
     else:
-        alns = [pysam.AlignmentFile(filename.strip(), reference_filename=args.fasta, require_index=True)
+        alns = [pysam.AlignmentFile(filename.split()[0].strip(), reference_filename=args.fasta, require_index=True)
             for filename in args.input_list]
 
     header, rgs = create_header(alns, chrom)
