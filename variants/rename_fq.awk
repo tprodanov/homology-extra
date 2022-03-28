@@ -1,6 +1,7 @@
 #!/bin/awk -f
 
 FNR == 1 {
+    print "Analyzing file", FILENAME > "/dev/tty"
     n = split(FILENAME, filename_split, "/")
     basename = filename_split[n]
     m = split(basename, basename_split, ".")
