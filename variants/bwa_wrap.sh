@@ -69,10 +69,10 @@ fi
 
 echo "Aligning reads"
 if [ -z ${sample} ]; then
+    bwa mem ${fasta} ${in_prefix}{1,2}.fq -t ${threads} > ${out_prefix}.unsort.sam
+else
     bwa mem ${fasta} -R "@RG\tID:${sample}\tSM:${sample}" \
         ${in_prefix}{1,2}.fq -t ${threads} > ${out_prefix}.unsort.sam
-else
-    bwa mem ${fasta} ${in_prefix}{1,2}.fq -t ${threads} > ${out_prefix}.unsort.sam
 fi
 
 echo "Sorting alignments"

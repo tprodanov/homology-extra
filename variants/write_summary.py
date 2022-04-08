@@ -7,6 +7,12 @@ from collections import defaultdict
 import numpy as np
 
 
+def float_or_nan(s):
+    if s == 'None':
+        return np.nan
+    return float(s)
+
+
 def write_summary(filename):
     if os.path.isfile(filename):
         dirname = os.path.dirname(filename)
@@ -36,7 +42,7 @@ def write_summary(filename):
                 print('Threshold  True-pos  False-pos  False-neg  Precision  Recall  F1-score')
                 print('----------------------------------------------------------------------')
         else:
-            roc_matrix.append(list(map(float, line)))
+            roc_matrix.append(list(map(float_or_nan, line)))
     inp.close()
     roc_matrix = np.array(roc_matrix)
     roc_matrix = np.delete(roc_matrix, 3, axis=1)
