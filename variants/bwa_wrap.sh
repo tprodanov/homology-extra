@@ -34,7 +34,7 @@ while (( "$#" )); do
             shift 2
             ;;
         -o|--output)
-            out_prefix="$2"
+            output="$2"
             shift 2
             ;;
         -f|--fasta-ref)
@@ -69,18 +69,18 @@ fi
 
 echo "Aligning reads"
 if [ -z ${sample} ]; then
-    bwa mem ${fasta} ${in_prefix}{1,2}.fq -t ${threads} > ${out_prefix}.unsort.sam
+    bwa mem ${fasta} ${in_prefix}{1,2}.fq -t ${threads} > ${output}.unsort.sam
 else
     bwa mem ${fasta} -R "@RG\tID:${sample}\tSM:${sample}" \
-        ${in_prefix}{1,2}.fq -t ${threads} > ${out_prefix}.unsort.sam
+        ${in_prefix}{1,2}.fq -t ${threads} > ${output}.unsort.sam
 fi
 
 echo "Sorting alignments"
-samtools sort -@ ${threads} -o ${out_prefix}.bwa.bam ${out_prefix}.unsort.sam
+samtools sort -@ ${threads} --reference ${fasta} -o ${output} ${output}.unsort.sam
 
 echo "Indexing alignments"
-samtools index -@ ${threads} ${out_prefix}.bwa.bam
-rm ${out_prefix}.unsort.sam
+samtools index -@ ${threads} ${output}
+rm ${output}.unsort.sam
 
 if [[ ${compress} = true ]]; then
     echo "Compressing reads back"
