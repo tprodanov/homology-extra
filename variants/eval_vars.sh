@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -eu
+set -e
 
 wdir="$(dirname "$0")"
 
@@ -86,6 +86,8 @@ elif [[ -z ${output} ]]; then
     >&2 echo "Error: Output directory (-o, --output) is not provided!"
     exit 1
 fi
+
+set -u
 
 regions="${output}/calling.bed"
 log="${output}/eval.log"

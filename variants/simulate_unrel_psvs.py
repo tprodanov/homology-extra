@@ -32,7 +32,6 @@ def simulate_psvs(in_vcf, out_vcf, rate):
         p = 1 - q
         ref_hom = p * p
         alt_hom = q * q
-        heteroz = 1 - ref_hom - alt_hom
         r = random.random()
         alt_allele = random.randrange(1, len(psv.alleles))
         if r <= ref_hom:

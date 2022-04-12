@@ -16,7 +16,7 @@ n_copies=0
 
 USAGE="$(cat <<-END
 Extract regions for variant calling.
-    -p <dir>,   --parascopy  <dir>
+    -i <dir>,   --input  <dir>
         Parascopy directory.
     -o <file>,   --output <file>
         Output file.
@@ -29,7 +29,7 @@ END
 
 while (( "$#" )); do
     case "$1" in
-        -p|--parascopy)
+        -i|--input)
             input="$2"
             shift 2
             ;;
@@ -56,6 +56,10 @@ while (( "$#" )); do
     esac
 done
 
+if [[ -d ${output} ]]; then
+    output=${output}/calling.bed
+fi
+
 mkdir -p $(dirname ${output})
 
 echo "Writing regions for variant calling to     ...     ${output}"
@@ -65,6 +69,8 @@ zgrep -v '^#' ${input}/res.samples.bed.gz | \
     {
         if ($13 != "*") {
             split($13, hom_regions, ",");
+        } else {
+            split("", hom_regions);
         }
         curr_n_copies = length(hom_regions) + 1;
         if (n_copies > 0 && curr_n_copies != n_copies) {

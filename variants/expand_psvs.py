@@ -37,7 +37,7 @@ def process_psvs(vcf, out_header):
             rec.ref = common.cond_rev_comp(var.alleles[ref_ix], strand=strand)
             rec.alts = [common.cond_rev_comp(seq, strand=strand)
                 for j, seq in enumerate(var.alleles) if j != ref_ix]
-            rec.info['fval'] = fvals[i]
+            rec.info['fval'] = fvals[i + 1]
             rec.info['main'] = main_pos
             yield rec
 
