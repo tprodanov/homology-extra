@@ -12,7 +12,9 @@ Evaluate diploid genotypes.
         Golden vcf.gz file.
     -p <dir>,   --parascopy <dir>
         Parascopy directory.
-    -f <file>,   --fasta-ref <file>
+    -P <str>,   --parascopy-name <str>
+        Parascopy name. By default, use basename of the Parascopy dir.
+    -f <file>,  --fasta-ref <file>
         Fasta reference. Must contain <file>.sdf index.
     -t <path> <path>,   --tools <path> <path>
         Freebayes & GATK paths. Use "freebayes" and "gatk" if not set.
@@ -40,6 +42,10 @@ while (( "$#" )); do
             ;;
         -p|--parascopy)
             parascopy="$2"
+            shift 2
+            ;;
+        -P|--parascopy-name)
+            par_name="$2"
             shift 2
             ;;
         -f|--fasta-ref)
@@ -87,6 +93,10 @@ elif [[ -z ${output} ]]; then
     exit 1
 fi
 
+if [[ -z ${par_name} ]]; then
+    par_name="$(basename ${parascopy})"
+fi
+
 set -u
 
 regions="${output}/calling.bed"
@@ -98,7 +108,6 @@ if [[ ! -f ${regions} ]]; then
     exit 1
 fi
 
-par_name="$(basename ${parascopy})"
 if [[ ${rerun} = true ]]; then
     rm -f ${output}/{golden,${par_name},freebayes,gatk}.vcf.gz{,.tbi}
 fi

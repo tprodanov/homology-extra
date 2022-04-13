@@ -9,7 +9,7 @@ Align reads using BWA.
     -i <prefix>, --input <prefix>
         Input prefix. There must be files <prefix>{1,2}.fq[.gz]
     -o <prefix>, --output <prefix>
-        Output prefix.
+        Output BAM/CRAM filename.
     -f <fasta>,  --fasta-ref <fasta>
         Fasta reference.
     -s <string>, --sample <string>
