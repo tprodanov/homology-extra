@@ -2,11 +2,12 @@
 
 import argparse
 import pysam
-import numpy as np
 import random
 import sys
 from tqdm import tqdm
 import scipy.stats
+import numpy as np
+from numpy.random import MT19937, RandomState, SeedSequence
 
 import parascopy.inner.common as common
 import parascopy.inner.itree as itree
@@ -40,32 +41,31 @@ def create_header(genome, sample, chroms):
     return vcf_header
 
 
-def create_substitution(ref):
+def create_substitution(ref, rs):
     alt = ref
     while alt == ref:
-        alt = random.choice('ACGT')
+        alt = 'ACGT'[rs.randint(4)]
     return alt
 
 
-def create_insertion(ref):
-    insert_length = random.randint(1, 3)
-    alt = ref + ''.join(random.choices('ACGT', k=insert_length))
+def create_insertion(ref, rs):
+    insert_length = rs.randint(1, 4)
+    alt = ref + ''.join('ACGT'[rs.randint(4)] for _ in range(insert_length))
     return alt
 
 
-def create_deletion(seq, i):
-    deletion_length = random.randint(1, 3)
-    assert i + deletion_length <= len(seq)
-    ref = seq[i : i + deletion_length]
+def create_deletion(seq, i, rs):
+    deletion_length = rs.randint(1, 4)
+    ref = seq[i : i + 1 + deletion_length]
     alt = seq[i]
+    assert len(ref) > 1
     return ref, alt
 
 
-def generate_chrom(genome, chrom_id, exclude_tree, mut_rates, hetero_rate, out_vcf):
+def generate_chrom(genome, chrom_id, exclude_tree, mut_rates, hetero_rate, out_vcf, rs):
     chrom = genome.chrom_name(chrom_id)
     chrom_len = genome.chrom_len(chrom_id)
     seq = genome.fetch_interval(Interval(chrom_id, 0, chrom_len))
-    # rs = np.random.uniform(size=chrom_len)
     mut_rates = np.cumsum(mut_rates)
     mut_prob = mut_rates[-1]
     assert mut_prob <= 1.0
@@ -73,7 +73,7 @@ def generate_chrom(genome, chrom_id, exclude_tree, mut_rates, hetero_rate, out_v
     with tqdm(total=chrom_len) as pbar:
         i = 0
         while True:
-            dist = scipy.stats.geom.rvs(mut_prob)
+            dist = scipy.stats.geom.rvs(mut_prob, random_state=rs)
             i += dist
             if i >= chrom_len:
                 break
@@ -85,13 +85,13 @@ def generate_chrom(genome, chrom_id, exclude_tree, mut_rates, hetero_rate, out_v
                 pbar.update()
                 continue
 
-            r = random.random() * mut_prob
+            r = rs.random_sample() * mut_prob
             if r <= mut_rates[0]:
-                alt = create_substitution(ref)
+                alt = create_substitution(ref, rs)
             elif r <= mut_rates[1]:
-                alt = create_insertion(ref)
+                alt = create_insertion(ref, rs)
             else:
-                ref, alt = create_deletion(seq, i)
+                ref, alt = create_deletion(seq, i, rs)
                 if 'N' in ref:
                     i += 1
                     pbar.update()
@@ -104,7 +104,7 @@ def generate_chrom(genome, chrom_id, exclude_tree, mut_rates, hetero_rate, out_v
                     pbar.update()
                     continue
 
-            r2 = random.random()
+            r2 = rs.random_sample()
             if r2 > hetero_rate:
                 gt = (1, 1)
             elif r2 > hetero_rate / 2:
@@ -146,19 +146,17 @@ def main():
         help='Optional: Only generate for a set of chromosoms.')
     args = parser.parse_args()
 
-    if args.seed is not None:
-        random.seed(args.seed)
-
     genome = Genome(args.fasta_ref)
     excl_tree = get_exclude_regions(args, genome)
     chroms = set(args.chroms) if args.chroms else None
     header = create_header(genome, args.sample, chroms)
 
+    rs = RandomState(MT19937(SeedSequence(args.seed)))
     with pysam.VariantFile(args.output, 'wz' if args.output.endswith('.gz') else 'w', header=header) as out_vcf:
         for chrom_id, chrom in enumerate(genome.chrom_names):
             if chroms is None or chrom in chroms:
                 sys.stderr.write('Chromosome {}\n'.format(chrom))
-                generate_chrom(genome, chrom_id, excl_tree, args.mutation_rate, args.hetero_rate, out_vcf)
+                generate_chrom(genome, chrom_id, excl_tree, args.mutation_rate, args.hetero_rate, out_vcf, rs)
 
     if args.output.endswith('.gz'):
         common.Process(['tabix', '-p', 'vcf', args.output]).finish()
