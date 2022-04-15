@@ -10,10 +10,8 @@ Evaluate diploid genotypes.
         Alignment file (BAM or CRAM).
     -g <file>,   --golden <file>
         Golden vcf.gz file.
-    -p <dir>,   --parascopy <dir>
-        Parascopy directory.
-    -P <str>,   --parascopy-name <str>
-        Parascopy name. By default, use basename of the Parascopy dir.
+    -p <dir> <str>,   --parascopy <dir> <str>
+        Parascopy directory and name.
     -f <file>,  --fasta-ref <file>
         Fasta reference. Must contain <file>.sdf index.
     -t <path> <path>,   --tools <path> <path>
@@ -43,11 +41,8 @@ while (( "$#" )); do
             ;;
         -p|--parascopy)
             parascopy="$2"
-            shift 2
-            ;;
-        -P|--parascopy-name)
-            par_name="$2"
-            shift 2
+            par_name="$3"
+            shift 3
             ;;
         -f|--fasta-ref)
             genome="$2"
@@ -77,22 +72,18 @@ while (( "$#" )); do
     esac
 done
 
-if [[ -z ${golden} ]]; then
-    >&2 echo "Error: Golden VCF file (-g, --golden) is not provided!"
+if [[ -z ${golden} ]] || [[ ! -f ${golden} ]]; then
+    >&2 echo "Error: Golden VCF file (-g, --golden) is not provided or does not exist!"
     exit 1
-elif [[ -z ${parascopy} ]]; then
-    >&2 echo "Error: Parascopy directory (-p, --parascopy) is not provided!"
+elif [[ -z ${parascopy} ]] || [[ ! -d ${parascopy} ]]; then
+    >&2 echo "Error: Parascopy directory (-p, --parascopy) is not provided or does not exist!"
     exit 1
-elif [[ -z ${genome} ]]; then
-    >&2 echo "Error: Fasta reference (-f, --fasta-ref) is not provided!"
+elif [[ -z ${genome} ]] || [[ ! -f ${genome} ]]; then
+    >&2 echo "Error: Fasta reference (-f, --fasta-ref) is not provided or does not exist!"
     exit 1
 elif [[ -z ${output} ]]; then
     >&2 echo "Error: Output directory (-o, --output) is not provided!"
     exit 1
-fi
-
-if [[ -z ${par_name} ]]; then
-    par_name="$(basename ${parascopy})"
 fi
 
 set -u
@@ -103,7 +94,7 @@ log="${output}/eval.log"
 echo "Command: $command" > ${log}
 
 if [[ ! -f ${regions} ]]; then
-    >& 2 echo "** Generating variant calling regions"
+    >& 2 echo "** Generating variant calling regions."
     ${wdir}/get_call_regions.sh -i ${parascopy} -f ${genome} -o ${regions} &>> ${log}
 fi
 
