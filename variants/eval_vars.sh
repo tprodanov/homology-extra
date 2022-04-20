@@ -94,8 +94,8 @@ log="${output}/eval.log"
 echo "Command: $command" > ${log}
 
 if [[ ! -f ${regions} ]]; then
-    >& 2 echo "** Generating variant calling regions."
-    ${wdir}/get_call_regions.sh -i ${parascopy} -f ${genome} -o ${regions} &>> ${log}
+    >&2 echo "** Generating variant calling regions."
+    zcat ${parascopy}/res.paralog.bed.gz | awk '$5 == "PASS" && $7 >= 20' > ${regions}
 fi
 
 if [[ ${rerun} = true ]]; then

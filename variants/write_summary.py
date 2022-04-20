@@ -5,6 +5,7 @@ import gzip
 import os
 from collections import defaultdict
 import numpy as np
+import argparse
 
 
 def float_or_nan(s):
@@ -13,7 +14,7 @@ def float_or_nan(s):
     return float(s)
 
 
-def write_summary(filename):
+def write_summary(filename, thresholds):
     if os.path.isfile(filename):
         dirname = os.path.dirname(filename)
     else:
@@ -25,8 +26,6 @@ def write_summary(filename):
         inp = gzip.open(filename, 'rt')
     else:
         inp = open(filename)
-
-    THRESHOLDS = [0, 10, 20, 50, 100]
 
     n_variants = None
     roc_matrix = []
@@ -48,7 +47,7 @@ def write_summary(filename):
     roc_matrix = np.delete(roc_matrix, 3, axis=1)
 
     ixs = defaultdict(list)
-    for thresh in THRESHOLDS:
+    for thresh in thresholds:
         curr_ixs = np.where(roc_matrix[:, 0] >= thresh)[0]
         if len(curr_ixs) > 0:
             curr_i = curr_ixs[-1]
@@ -68,8 +67,14 @@ def write_summary(filename):
 
 
 def main():
-    for arg in sys.argv[1:]:
-        write_summary(arg)
+    parser = argparse.ArgumentParser()
+    parser.add_argument('input', nargs='+', help='Input directories')
+    parser.add_argument('-t', '--thresholds', nargs='+', default=(0, 10, 20, 50, 100), type=float,
+        help='Quality thresholds [default %(default)s].')
+    args = parser.parse_args()
+
+    for path in args.input:
+        write_summary(path, args.thresholds)
 
 
 if __name__ == '__main__':
