@@ -51,7 +51,7 @@ def write_summary(filename, thresholds):
         curr_ixs = np.where(roc_matrix[:, 0] >= thresh)[0]
         if len(curr_ixs) > 0:
             curr_i = curr_ixs[-1]
-            ixs[curr_i].append('≥ {}'.format(thresh))
+            ixs[curr_i].append('≥ {:.0f}'.format(thresh))
 
     true_pos_rate = roc_matrix[:, 1] / n_variants
     for col, flag in [(4, 'best precision'), (5, 'best recall'), (6, 'best F1')]:
