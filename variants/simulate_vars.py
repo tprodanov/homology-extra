@@ -14,18 +14,15 @@ import parascopy.inner.itree as itree
 from parascopy.inner.genome import Genome, Interval
 
 
-def get_exclude_regions(args, genome):
+def get_exclude_variants(args, genome):
     if args.exclude is None:
         return None
 
     excl_tree = itree.MultiChromTree()
-    with common.open_possible_gzip(args.exclude) as inp:
-        for line in inp:
-            if line.startswith('#'):
-                continue
-            chrom, pos, _rest = line.split('\t', 2)
-            pos = int(pos)
-            excl_tree.add(Interval(genome.chrom_id(chrom), pos, pos + 1), None)
+    with pysam.VariantFile(args.exclude) as inp:
+        for record in inp:
+            rec_interval = Interval(genome.chrom_id(record.chrom), record.start, record.start + len(record.ref))
+            excl_tree.add(rec_interval, None)
     return excl_tree
 
 
@@ -147,7 +144,7 @@ def main():
     args = parser.parse_args()
 
     genome = Genome(args.fasta_ref)
-    excl_tree = get_exclude_regions(args, genome)
+    excl_tree = get_exclude_variants(args, genome)
     chroms = set(args.chroms) if args.chroms else None
     header = create_header(genome, args.sample, chroms)
 

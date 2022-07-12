@@ -111,7 +111,9 @@ fi
 
 if [[ ! -f ${output}/${par_name}.vcf.gz ]]; then
     >&2 echo "** Filtering Parascopy VCF file."
-    rtg vcffilter --include-bed=${regions} -i ${parascopy}/variants.vcf.gz -o ${output}/${par_name}.vcf.gz &>> ${log}
+    rtg vcffilter --include-bed=${regions} -i ${parascopy}/variants.vcf.gz -o ${output}/${par_name}.vcf.gz \
+        --keep-expr "SAMPLES[0].FILT.split(',').every(function(filt) { return filt != 'StrandBias' })" \
+        &>> ${log}
 else
     >&2 echo "!! Skipping Parascopy VCF file."
 fi

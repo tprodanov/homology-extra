@@ -17,12 +17,14 @@ def create_header(in_header, sample):
     return out_header
 
 
-def simulate_psvs(in_vcf, out_vcf, rate):
+def simulate_psvs(in_vcf, out_vcf, rate, max_len):
     last_chrom = None
     last_end = None
 
     for psv in in_vcf:
         if psv.chrom == last_chrom and psv.start <= last_end:
+            continue
+        if max(map(len, psv.alleles)) > max_len:
             continue
         fval = psv.info['fval']
         if np.isnan(fval):
@@ -70,6 +72,8 @@ def main():
         help='Sample name [default: "%(default)s"].')
     parser.add_argument('-S', '--seed', type=int,
         help='Optional seed.')
+    parser.add_argument('-m', '--max-len', type=int, default=30,
+        help='Maximum PSV length [default: %(default)s].')
     args = parser.parse_args()
 
     if args.seed is not None:
@@ -78,7 +82,7 @@ def main():
     with pysam.VariantFile(args.input) as in_vcf:
         header = create_header(in_vcf.header, args.sample)
         with pysam.VariantFile(args.output, 'wz' if args.output.endswith('.gz') else 'w', header=header) as out_vcf:
-            simulate_psvs(in_vcf, out_vcf, args.rate)
+            simulate_psvs(in_vcf, out_vcf, args.rate, args.max_len)
 
     if args.output.endswith('.gz'):
         common.Process(['tabix', '-p', 'vcf', args.output]).finish()
