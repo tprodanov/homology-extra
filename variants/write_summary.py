@@ -14,7 +14,7 @@ def float_or_nan(s):
     return float(s)
 
 
-def write_summary(filename, thresholds):
+def write_summary(filename, thresholds, only_thresholds):
     if os.path.isfile(filename):
         dirname = os.path.dirname(filename)
     else:
@@ -54,9 +54,10 @@ def write_summary(filename, thresholds):
             ixs[curr_i].append('≥ {:.0f}'.format(thresh))
 
     true_pos_rate = roc_matrix[:, 1] / n_variants
-    for col, flag in [(4, 'best precision'), (5, 'best recall'), (6, 'best F1')]:
-        curr_i = np.argmax(roc_matrix[:, col] + true_pos_rate * 0.0001)
-        ixs[curr_i].append(flag)
+    if not only_thresholds:
+        for col, flag in [(4, 'best precision'), (5, 'best recall'), (6, 'best F1')]:
+            curr_i = np.argmax(roc_matrix[:, col] + true_pos_rate * 0.0001)
+            ixs[curr_i].append(flag)
 
     for i, flags in sorted(ixs.items()):
         s = '{:9.3f}  {:8.0f}  {:9.0f}  {:9.0f}  {:9.4f}  {:6.4f}  {:8.4f}'.format(*roc_matrix[i])
@@ -71,10 +72,12 @@ def main():
     parser.add_argument('input', nargs='+', help='Input directories')
     parser.add_argument('-t', '--thresholds', nargs='+', default=(0, 10, 20, 50, 100), type=float,
         help='Quality thresholds [default %(default)s].')
+    parser.add_argument('-T', '--only-thresholds', action='store_true',
+        help='Print only accuracy values for quality thresholds.')
     args = parser.parse_args()
 
     for path in args.input:
-        write_summary(path, args.thresholds)
+        write_summary(path, args.thresholds, args.only_thresholds)
 
 
 if __name__ == '__main__':
