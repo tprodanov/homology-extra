@@ -125,10 +125,10 @@ for cn in "${cns[@]}"; do
 
     readarray -t reg_stats < <(awk '{ n += 1; l += $3 - $2 } END { printf("%d\n%d\n",n,l) }' "${subdir}/eval.bed")
     if [[ "${reg_stats[0]}" -eq 0 ]]; then
-        echo -e "\n=== Evaluation over empty regions, continuing ===\n"
+        echo -e "\n=== No regions to analyze, continuing ===\n"
         continue;
     fi
-    echo -e "\n=== Evaluation over ${reg_stats[0]} regions, in total ${reg_stats[1]} bp ===\n"
+    echo -e "\n=== Examining ${reg_stats[0]} regions, in total ${reg_stats[1]} bp ==="
 
     rtg "RTG_MEM=${mem}" vcfeval \
         -e "${subdir}/eval.bed" \
@@ -140,7 +140,7 @@ for cn in "${cns[@]}"; do
         --sample-ploidy=${cn} &> "${subdir}/eval.log"
     ${wdir}/write_summary.py "${subdir}/eval"
 
-    echo "\n=== Evaluating squashed variants ===\n"
+    echo -e "\n=== Evaluating squashed variants ==="
     rtg "RTG_MEM=${mem}" vcfeval \
         -e "${subdir}/eval.bed" \
         --decompose \
