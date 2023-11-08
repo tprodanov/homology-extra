@@ -12,7 +12,7 @@ Evaluate pooled genotypes.
     -f <file>,   --fasta-ref <file>
         Fasta reference. Must contain <file>.sdf index.
     --padding <int>
-        Padding around the golden variants with unexpected copy number [default: 5]
+        Padding around the benchmark variants with unexpected copy number [default: 5]
 END
 )"
 
@@ -57,10 +57,11 @@ for cn in "${cns[@]}"; do
     zgrep -v '^#' ${input}/res.matrix.bed.gz | awk -v cn=${cn} '$5 == cn' | cut -f1-3 | \
         bedtools merge -i - > ${output}/calling_${cn}.bed
 
-    echo -e "\n=== Filtering golden VCF ==="
-    rm -f ${output}/golden_${cn}.vcf.gz{,.tbi}
-    rtg vcffilter --include-bed=${output}/calling_${cn}.bed -i golden_pooled.vcf.gz -o ${output}/golden_${cn}.vcf.gz
-    zgrep -v '^#' ${output}/golden_${cn}.vcf.gz | \
+    echo -e "\n=== Filtering benchmark VCF ==="
+    rm -f ${output}/benchmark_${cn}.vcf.gz{,.tbi}
+    rtg vcffilter --include-bed=${output}/calling_${cn}.bed -i benchmark_pooled.vcf.gz \
+        -o ${output}/benchmark_${cn}.vcf.gz
+    zgrep -v '^#' ${output}/benchmark_${cn}.vcf.gz | \
         awk -v cn=${cn} -v padding=${padding} 'BEGIN {OFS="\t"} {
             split($10, a, "|"); if (length(a) != cn) { print $1, $2 - padding - 1, $2 + length($3) + padding - 1 }
         }' > ${output}/exclude_${cn}.bed
@@ -72,7 +73,7 @@ for cn in "${cns[@]}"; do
 
     rm -rf ${output}/eval-${cn}
     rtg vcfeval \
-        -b ${output}/golden_${cn}.vcf.gz \
+        -b ${output}/benchmark_${cn}.vcf.gz \
         -c ${output}/parascopy_${cn}.vcf.gz \
         -t ${genome}.sdf \
         -o ${output}/eval-${cn} \
@@ -80,7 +81,7 @@ for cn in "${cns[@]}"; do
 
     rm -rf ${output}/eval-${cn}-squash
     rtg vcfeval \
-        -b ${output}/golden_${cn}.vcf.gz \
+        -b ${output}/benchmark_${cn}.vcf.gz \
         -c ${output}/parascopy_${cn}.vcf.gz \
         -t ${genome}.sdf \
         -o ${output}/eval-${cn}-squash \
