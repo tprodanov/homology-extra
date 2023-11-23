@@ -130,26 +130,34 @@ for cn in "${cns[@]}"; do
     fi
     echo -e "\n=== Examining ${reg_stats[0]} regions, in total ${reg_stats[1]} bp ==="
 
-    rtg "RTG_MEM=${mem}" vcfeval \
-        -e "${subdir}/eval.bed" \
-        --decompose \
-        -b "${subdir}/bench.vcf.gz" \
-        -c "${subdir}/calls.vcf.gz" \
-        -t "${genome}.sdf" \
-        -o "${subdir}/eval" \
-        --sample-ploidy=${cn} &> "${subdir}/eval.log"
+    if [[ -f "${subdir}/eval/done" ]]; then
+        echo "Skipping evaluation"
+    else
+        rtg "RTG_MEM=${mem}" vcfeval \
+            -e "${subdir}/eval.bed" \
+            --decompose \
+            -b "${subdir}/bench.vcf.gz" \
+            -c "${subdir}/calls.vcf.gz" \
+            -t "${genome}.sdf" \
+            -o "${subdir}/eval" \
+            --sample-ploidy=${cn} &> "${subdir}/eval.log"
+    fi
     ${wdir}/write_summary.py "${subdir}/eval"
 
     echo -e "\n=== Evaluating squashed variants ==="
-    rtg "RTG_MEM=${mem}" vcfeval \
-        -e "${subdir}/eval.bed" \
-        --decompose \
-        -b "${subdir}/bench.vcf.gz" \
-        -c "${subdir}/calls.vcf.gz" \
-        -t "${genome}.sdf" \
-        -o "${subdir}/eval_squash" \
-        --squash-ploidy \
-        --sample-ploidy=${cn} &> "${subdir}/eval_squash.log"
+    if [[ -f "${subdir}/eval_squash/done" ]]; then
+        echo "Skipping evaluation"
+    else
+        rtg "RTG_MEM=${mem}" vcfeval \
+            -e "${subdir}/eval.bed" \
+            --decompose \
+            -b "${subdir}/bench.vcf.gz" \
+            -c "${subdir}/calls.vcf.gz" \
+            -t "${genome}.sdf" \
+            -o "${subdir}/eval_squash" \
+            --squash-ploidy \
+            --sample-ploidy=${cn} &> "${subdir}/eval_squash.log"
+    fi
     ${wdir}/write_summary.py "${subdir}/eval_squash"
     echo
 done
