@@ -96,7 +96,7 @@ def generate_chrom(genome, chrom_id, exclude_tree, mut_rates, hetero_rate, out_v
 
             if exclude_tree is not None:
                 region = Interval(chrom_id, i - 1, i + len(ref) + 1)
-                if exclude_tree.overlap_size(region) > 0:
+                if exclude_tree.n_overlaps(region) > 0:
                     i += 1
                     pbar.update()
                     continue

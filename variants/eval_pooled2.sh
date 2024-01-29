@@ -95,7 +95,7 @@ elif [[ ! -f ${examine-} ]]; then
     >&2 echo "Error: Examine BED file is not provided or does not exist!"
     exit 1
 elif [[ -z ${output} ]]; then
-    >&2 echo "Error: Output directory (-o, --output) is not provided!"
+     >&2 echo "Error: Output directory (-o, --output) is not provided!"
     exit 1
 fi
 
@@ -108,8 +108,9 @@ for cn in "${cns[@]}"; do
         echo "Skipping ${subdir}"
         continue
     fi
-    rm -rf "${subdir}"
+    # rm -rf "${subdir}"
     mkdir -p "${subdir}"
+    rm -rf "${subdir}/"{bench,calls}.vcf.gz{,.tbi}
 
     echo -e "=== Reference CN ${cn} ==="
     zgrep -v '^#' ${examine} | awk -v cn=${cn} '$4 == "PASS" && $5 == cn' | cut -f1-3 | \
@@ -134,26 +135,31 @@ for cn in "${cns[@]}"; do
     fi
     echo -e "\n=== Examining ${reg_stats[0]} regions, in total ${reg_stats[1]} bp ==="
 
-    rtg "RTG_MEM=${mem}" vcfeval \
-        -e "${subdir}/eval.bed" \
-        --decompose \
-        -b "${subdir}/bench.vcf.gz" \
-        -c "${subdir}/calls.vcf.gz" \
-        -t "${genome}.sdf" \
-        -o "${subdir}/eval" \
-        --sample-ploidy=${cn} &> "${subdir}/eval.log"
-    ${wdir}/write_summary.py "${subdir}/eval"
+    if [[ ! -f "${subdir}/eval/done" ]]; then
+        rtg "RTG_MEM=${mem}" vcfeval \
+            -e "${subdir}/eval.bed" \
+            --decompose \
+            -b "${subdir}/bench.vcf.gz" \
+            -c "${subdir}/calls.vcf.gz" \
+            -t "${genome}.sdf" \
+            -o "${subdir}/eval" \
+            --sample-ploidy=${cn} &> "${subdir}/eval.log"
+        ${wdir}/write_summary.py "${subdir}/eval"
+    fi
 
     echo -e "\n=== Evaluating squashed variants ==="
-    rtg "RTG_MEM=${mem}" vcfeval \
-        -e "${subdir}/eval.bed" \
-        --decompose \
-        -b "${subdir}/bench.vcf.gz" \
-        -c "${subdir}/calls.vcf.gz" \
-        -t "${genome}.sdf" \
-        -o "${subdir}/eval_squash" \
-        --squash-ploidy \
-        --sample-ploidy=${cn} &> "${subdir}/eval_squash.log"
-    ${wdir}/write_summary.py "${subdir}/eval_squash"
+    if [[ ! -f "${subdir}/eval_squash" ]]; then
+        rtg "RTG_MEM=${mem}" vcfeval \
+            -e "${subdir}/eval.bed" \
+            --decompose \
+            -b "${subdir}/bench.vcf.gz" \
+            -c "${subdir}/calls.vcf.gz" \
+            -t "${genome}.sdf" \
+            -o "${subdir}/eval_squash" \
+            -f QUAL \
+            --squash-ploidy \
+            --sample-ploidy=${cn} &> "${subdir}/eval_squash.log"
+        ${wdir}/write_summary.py "${subdir}/eval_squash"
+    fi
     echo
 done
