@@ -69,13 +69,14 @@ def write_summary(filename, thresholds, only_thresholds):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('input', nargs='+', help='Input directories')
-    parser.add_argument('-t', '--thresholds', nargs='+', default=(0, 10, 20, 50, 100), type=float,
-        help='Quality thresholds [default %(default)s].')
+    parser.add_argument('input', nargs='+', metavar='FILE', help='Input directories')
+    parser.add_argument('-t', '--thresholds', metavar='FLOAT,FLOAT...', default='0,10,20,50,100',
+        help='Quality thresholds, through comma [default %(default)s].')
     parser.add_argument('-T', '--only-thresholds', action='store_true',
         help='Print only accuracy values for quality thresholds.')
     args = parser.parse_args()
 
+    thresholds = list(map(float, args.thresholds.split(',')))
     for path in args.input:
         write_summary(path, args.thresholds, args.only_thresholds)
 
