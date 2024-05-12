@@ -78,7 +78,7 @@ def main():
 
     thresholds = list(map(float, args.thresholds.split(',')))
     for path in args.input:
-        write_summary(path, args.thresholds, args.only_thresholds)
+        write_summary(path, thresholds, args.only_thresholds)
 
 
 if __name__ == '__main__':
