@@ -23,6 +23,8 @@ Evaluate pooled genotypes.
         List of copy numbers through comma [default: 4,6,8].
     --memory       <str>
         Available memory [10G].
+    --squash-only
+        Only perform squashed evaluation.
 END
 )"
 
@@ -30,6 +32,7 @@ padding=5
 incns="4,6,8"
 discard=/dev/null
 mem=10G
+squash_only=false
 
 while (( "$#" )); do
     case "$1" in
@@ -70,6 +73,10 @@ while (( "$#" )); do
         --memory)
             mem="$2"
             shift 2
+            ;;
+        --squash-only)
+            squash_only=true
+            shift 1
             ;;
         -h|--help)
             echo "${USAGE}"
@@ -135,7 +142,7 @@ for cn in "${cns[@]}"; do
     fi
     echo -e "\n=== Examining ${reg_stats[0]} regions, in total ${reg_stats[1]} bp ==="
 
-    if [[ ! -f "${subdir}/eval/done" ]]; then
+    if [[ ! -f "${subdir}/eval/done" && "$squash_only" = false ]]; then
         rtg "RTG_MEM=${mem}" vcfeval \
             -e "${subdir}/eval.bed" \
             --decompose \

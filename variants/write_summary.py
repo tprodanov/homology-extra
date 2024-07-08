@@ -53,6 +53,9 @@ def write_summary(filename, thresholds, only_thresholds):
             curr_i = curr_ixs[-1]
             ixs[curr_i].append('≥ {:.0f}'.format(thresh))
 
+    if roc_matrix.shape[0] == 1 and np.isnan(roc_matrix[0, 0]):
+        roc_matrix[0, 0] = 0
+
     true_pos_rate = roc_matrix[:, 1] / n_variants
     if not only_thresholds:
         for col, flag in [(4, 'best precision'), (5, 'best recall'), (6, 'best F1')]:
