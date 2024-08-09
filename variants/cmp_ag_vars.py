@@ -4,6 +4,7 @@ import sys
 import pysam
 import argparse
 import warnings
+import numpy as np
 from scipy.stats import pearsonr, spearmanr, ConstantInputWarning, NearConstantInputWarning
 from collections import defaultdict
 from intervaltree import IntervalTree
@@ -61,7 +62,17 @@ def af_str(var):
     return ','.join(map('{:.6f}'.format, af))
 
 
-def process_var(wgs_var, wes_var, samples, genes, exons, out):
+
+def count_evens(genotypes, allele):
+    counts = np.zeros((2, 2), dtype=int)
+    for wgs_gt, wes_gt in genotypes:
+        wgs_ev = allele in wgs_gt
+        wes_ev = allele in wes_gt
+        counts[wgs_ev, wes_ev] += 1
+
+
+
+def process_var(wgs_var, wes_var, samples, genes, exons, out, depth, quality):
     chrom = wgs_var.chrom
     start = wgs_var.start
     assert chrom == wes_var.chrom and start == wgs_var.start
@@ -76,15 +87,23 @@ def process_var(wgs_var, wes_var, samples, genes, exons, out):
     count = 0
     matches = 0
     mism1 = 0
+    sum_ploidy = 0
 
     sum_match = 0
     sum_size = 0
     n_zeros1 = []
     n_zeros2 = []
+    differences = []
+    genotypes = []
 
     for sample in samples:
         wgs_call = wgs_var.samples[sample]
         wes_call = wes_var.samples[sample]
+        wgs_qual = wgs_call.get('GQ') or 0
+        wes_qual = wes_call.get('GQ') or 0
+        if wgs_qual < quality or wes_qual < quality:
+            continue
+
         wgs_gt = wgs_call.get('GT')
         wes_gt = wes_call.get('GT')
         if wgs_gt is None or wgs_gt[0] is None or wes_gt is None or wes_gt[0] is None:
@@ -92,37 +111,55 @@ def process_var(wgs_var, wes_var, samples, genes, exons, out):
 
         wgs_gt = sorted(wgs_gt)
         wes_gt = sorted(corresp[j] for j in wes_gt)
-        # except IndexError:
-        #     sys.stderr.write(f'{chrom}\t{start+1}\t{wgs_var.alleles}\t{wes_var.alleles}\t{corresp}\t'
-        #         f'{gt_str(wgs_gt)}\t{gt_str(wes_gt)}\n')
-        #     raise
         gt_size = len(wgs_gt)
         if len(wes_gt) != gt_size:
             sys.stderr.write('Genotype lengths do not match at '
                 f'{chrom}:{start+1} for {sample}: {gt_str(wgs_gt)} and {gt_str(wes_gt)}\n')
             continue
+        if wgs_call.get('DP') < depth * gt_size or wes_call.get('DP') < depth * gt_size:
+            continue
+
+        sum_ploidy += gt_size
         count += 1
         match_size = sum(i == j for i, j in zip(wgs_gt, wes_gt))
+        differences.append(gt_size - match_size)
         matches += match_size == gt_size
         mism1 += match_size == gt_size - 1
         sum_size += gt_size
         sum_match += match_size
         n_zeros1.append(sum(i == 0 for i in wgs_gt))
         n_zeros2.append(sum(j == 0 for j in wes_gt))
+        genotypes.append((wgs_gt, wes_gt))
 
-    biallelic = len(wgs_var.alts) == 1
-    out.write(f'{chrom}\t{start+1}\t{wgs_var.ref}\t{",".join(wgs_var.alts)}\t{"FT"[biallelic]}\t')
+    out.write(f'{chrom}\t{start+1}\t{wgs_var.ref}\t{",".join(wgs_var.alts)}\t')
     out.write(f'{fmt_regions(genes, wgs_var)}\t{fmt_regions(exons, wgs_var)}\t')
-    out.write('{}\t{}\t{}\t'.format(wgs_var.info['overlPSV'], af_str(wgs_var), af_str(wes_var)))
+    mean_ploidy = sum_ploidy / count if count else np.nan
+    # NOTE: WES AF may be in an incorrect order.
+    out.write('{}\t{:.4f}\t{}\t{}\t'.format(wgs_var.info['overlPSV'], mean_ploidy, af_str(wgs_var), af_str(wes_var)))
+
     out.write(f'{count}\t{matches}\t{mism1}\t{sum_size}\t{sum_match}\t')
-    if count >= 5:
-        out.write(f'{pearsonr(n_zeros1, n_zeros2).statistic:.5f}\t{spearmanr(n_zeros1, n_zeros2).statistic:.5f}\n')
+    if count:
+        out.write('{:.4f}\t{:.4f}\t'.format(np.mean(differences), np.median(differences)))
     else:
-        out.write('nan\tnan\n')
+        out.write('nan\tnan\t')
+
+    if count >= 5:
+        out.write(f'{pearsonr(n_zeros1, n_zeros2).statistic:.5f}\t{spearmanr(n_zeros1, n_zeros2).statistic:.5f}\t')
+    else:
+        out.write('nan\tnan\t')
+
+    if count:
+        conc = []
+        for allele in range(1, len(wgs_var.alleles)):
+            conc.append(sum((allele in wgs_gt) == (allele in wes_gt) for wgs_gt, wes_gt in genotypes) / count)
+        out.write(','.join(map('{:.6f}'.format, conc)))
+    else:
+        out.write('nan')
+    out.write('\n')
     return True
 
 
-def process_vcfs(wgs_vcf, wes_vcf, genes, exons, out):
+def process_vcfs(wgs_vcf, wes_vcf, genes, exons, out, depth, quality):
     samples = sorted(set(wgs_vcf.header.samples) & set(wes_vcf.header.samples))
     total1 = 0
     total2 = 0
@@ -141,7 +178,7 @@ def process_vcfs(wgs_vcf, wes_vcf, genes, exons, out):
                 wes_var = next(wes_vcf)
                 total2 += 1
             else:
-                processed += process_var(wgs_var, wes_var, samples, genes, exons, out)
+                processed += process_var(wgs_var, wes_var, samples, genes, exons, out, depth, quality)
                 wgs_var = next(wgs_vcf)
                 wes_var = next(wes_vcf)
                 total1 += 1
@@ -162,6 +199,10 @@ def main():
         help='BED file with exon information. 4-6 columns: gene, gene type, record type (gene/exon).')
     parser.add_argument('-o', '--output', required=True, metavar='FILE',
         help='Output CSV file.')
+    parser.add_argument('-d', '--depth', metavar='FLOAT', type=float, default=5,
+        help='Only compare variant calls with read depth over FLOAT * ploidy [%(default)s].')
+    parser.add_argument('-q', '--quality', metavar='FLOAT', type=float, default=10,
+        help='Quality threshold for comparison [%(default)s].')
     args = parser.parse_args()
 
     sys.stderr.write('Loading genes and exons\n')
@@ -173,10 +214,13 @@ def main():
     with common.open_possible_gzip(args.output, 'w') as out, \
             pysam.VariantFile(args.wgs) as wgs_vcf, pysam.VariantFile(args.wes) as wes_vcf:
         out.write('# {}\n'.format(' '.join(sys.argv)))
-        out.write('chrom\tstart\tref\talts\tbiallelic\tgenes\texons\tpsv\twgs_AF\twes_AF\t')
-        out.write('count\tfull_match\tmism1\tsum_size\tsum_match\tpearson\tspearman\n')
+        out.write(f'# depth threshold = {args.depth} * ploidy\n')
+        out.write(f'# quality threshold = {args.quality}\n')
+        out.write('chrom\tstart\tref\talts\tgenes\texons\tpsv\tmean_ploidy\twgs_AF\twes_AF\t')
+        out.write('count\tfull_match\tmism1\tsum_size\tsum_match\tmean_diff\tmedian_diff\tpearson\tspearman\t')
+        out.write('event_conc\n')
         sys.stderr.write('Processing VCF files\n')
-        process_vcfs(wgs_vcf, wes_vcf, genes, exons, out)
+        process_vcfs(wgs_vcf, wes_vcf, genes, exons, out, args.depth, args.quality)
 
 
 if __name__ == '__main__':
