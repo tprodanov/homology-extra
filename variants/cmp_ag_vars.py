@@ -4,6 +4,7 @@ import sys
 import pysam
 import argparse
 import warnings
+import itertools
 import numpy as np
 from scipy.stats import pearsonr, spearmanr, ConstantInputWarning, NearConstantInputWarning
 from collections import defaultdict
@@ -35,15 +36,29 @@ def load_bed(f):
     return genes, exons
 
 
-def allele_correspondence(alleles1, alleles2):
+def reconcile_vars(var1, var2):
     """
-    Retuns correspondence from the first to the second set of alleles:
-    alleles1[i] == alleles2[corresp[i]]
+    Reconciles allele sets of two variants.
+    Returns combined set of alleles, as well index schemes:
+        alleles[i] = var1.alleles[c1[i]]
     """
-    try:
-        return [alleles2.index(a) for a in alleles1]
-    except ValueError:
-        return None
+    assert var1.ref == var2.ref
+    alleles = [var1.ref]
+    c1 = [0]
+    c2 = [0]
+    for allele in itertools.chain(var1.alts, var2.alts):
+        if allele in alleles:
+            continue
+        alleles.append(allele)
+        try:
+            c1.append(var1.alleles.index(allele))
+        except ValueError:
+            c1.append(None)
+        try:
+            c2.append(var2.alleles.index(allele))
+        except ValueError:
+            c2.append(None)
+    return alleles, c1, c2
 
 
 def fmt_regions(regions, var):
@@ -55,21 +70,13 @@ def gt_str(gt):
     return '/'.join(map(str, gt))
 
 
-def af_str(var):
-    af = var.info.get('AF')
-    if af is None:
-        return '*'
-    return ','.join(map('{:.6f}'.format, af))
-
-
-
-def count_evens(genotypes, allele):
-    counts = np.zeros((2, 2), dtype=int)
-    for wgs_gt, wes_gt in genotypes:
-        wgs_ev = allele in wgs_gt
-        wes_ev = allele in wes_gt
-        counts[wgs_ev, wes_ev] += 1
-
+def format_af(var, i):
+    if i is None:
+        return '0'
+    elif i == 0:
+        return 'NA'
+    else:
+        return f'{var.info["AF"][i - 1]:.5f}'
 
 
 def process_var(wgs_var, wes_var, samples, genes, exons, out, depth, quality):
@@ -79,83 +86,66 @@ def process_var(wgs_var, wes_var, samples, genes, exons, out, depth, quality):
     if wgs_var.ref != wes_var.ref or len(wgs_var.alleles) != len(wes_var.alleles):
         return False
 
-    corresp = allele_correspondence(wgs_var.alleles, wes_var.alleles)
-    if corresp is None:
-        return False
-    assert corresp[0] == 0
-
-    count = 0
-    matches = 0
-    mism1 = 0
-    sum_ploidy = 0
-
-    sum_match = 0
-    sum_size = 0
-    n_zeros1 = []
-    n_zeros2 = []
-    differences = []
-    genotypes = []
+    alleles, c1, c2 = reconcile_vars(wgs_var, wes_var)
+    n_alleles = len(alleles)
+    # Genotype ploidies for each applicable sample.
+    ploidies = []
+    # Allele counts for each allele and each applicable sample.
+    wgs = [[] for _ in range(n_alleles)]
+    wes = [[] for _ in range(n_alleles)]
 
     for sample in samples:
         wgs_call = wgs_var.samples[sample]
         wes_call = wes_var.samples[sample]
-        wgs_qual = wgs_call.get('GQ') or 0
-        wes_qual = wes_call.get('GQ') or 0
-        if wgs_qual < quality or wes_qual < quality:
+        if (wgs_call.get('GQ') or 0) < quality or (wes_call.get('GQ') or 0) < quality:
             continue
-
         wgs_gt = wgs_call.get('GT')
         wes_gt = wes_call.get('GT')
         if wgs_gt is None or wgs_gt[0] is None or wes_gt is None or wes_gt[0] is None:
             continue
-
-        wgs_gt = sorted(wgs_gt)
-        wes_gt = sorted(corresp[j] for j in wes_gt)
-        gt_size = len(wgs_gt)
-        if len(wes_gt) != gt_size:
+        ploidy = len(wgs_gt)
+        if len(wes_gt) != ploidy:
             sys.stderr.write('Genotype lengths do not match at '
                 f'{chrom}:{start+1} for {sample}: {gt_str(wgs_gt)} and {gt_str(wes_gt)}\n')
             continue
-        if wgs_call.get('DP') < depth * gt_size or wes_call.get('DP') < depth * gt_size:
+        if wgs_call.get('DP') < depth * ploidy or wes_call.get('DP') < depth * ploidy:
             continue
+        ploidies.append(ploidy)
+        for i in range(n_alleles):
+            wgs[i].append(wgs_gt.count(c1[i]))
+            wes[i].append(wes_gt.count(c2[i]))
 
-        sum_ploidy += gt_size
-        count += 1
-        match_size = sum(i == j for i, j in zip(wgs_gt, wes_gt))
-        differences.append(gt_size - match_size)
-        matches += match_size == gt_size
-        mism1 += match_size == gt_size - 1
-        sum_size += gt_size
-        sum_match += match_size
-        n_zeros1.append(sum(i == 0 for i in wgs_gt))
-        n_zeros2.append(sum(j == 0 for j in wes_gt))
-        genotypes.append((wgs_gt, wes_gt))
+    ploidies = np.array(ploidies)
+    wgs = np.array(wgs)
+    wes = np.array(wes)
 
-    out.write(f'{chrom}\t{start+1}\t{wgs_var.ref}\t{",".join(wgs_var.alts)}\t')
-    out.write(f'{fmt_regions(genes, wgs_var)}\t{fmt_regions(exons, wgs_var)}\t')
-    mean_ploidy = sum_ploidy / count if count else np.nan
-    # NOTE: WES AF may be in an incorrect order.
-    out.write('{}\t{:.4f}\t{}\t{}\t'.format(wgs_var.info['overlPSV'], mean_ploidy, af_str(wgs_var), af_str(wes_var)))
+    count = len(ploidies)
+    mean_ploidy = np.mean(ploidies) if count else np.nan
+    prefix = f'{chrom}\t{start+1}\t{alleles[0]}\t{",".join(alleles[1:])}\t'
+    prefix += f'{fmt_regions(genes, wgs_var)}\t{fmt_regions(exons, wgs_var)}\t'
+    prefix += f'{wgs_var.info["overlPSV"]}\t{mean_ploidy:.5f}'
+    if not count:
+        out.write(prefix)
+        out.write('\n')
+        return True
 
-    out.write(f'{count}\t{matches}\t{mism1}\t{sum_size}\t{sum_match}\t')
-    if count:
-        out.write('{:.4f}\t{:.4f}\t'.format(np.mean(differences), np.median(differences)))
-    else:
-        out.write('nan\tnan\t')
+    if wgs_var.alleles != wes_var.alleles:
+        print(chrom, start + 1, wgs_var.alleles, wes_var.alleles, alleles, c1, c2)
 
-    if count >= 5:
-        out.write(f'{pearsonr(n_zeros1, n_zeros2).statistic:.5f}\t{spearmanr(n_zeros1, n_zeros2).statistic:.5f}\t')
-    else:
-        out.write('nan\tnan\t')
-
-    if count:
-        conc = []
-        for allele in range(1, len(wgs_var.alleles)):
-            conc.append(sum((allele in wgs_gt) == (allele in wes_gt) for wgs_gt, wes_gt in genotypes) / count)
-        out.write(','.join(map('{:.6f}'.format, conc)))
-    else:
-        out.write('nan')
-    out.write('\n')
+    sum_ploidies = np.sum(ploidies)
+    for i in range(n_alleles):
+        out.write(f'{prefix}\t{i}\t{format_af(wgs_var, c1[i])}\t{format_af(wes_var, c2[i])}\t')
+        out.write('{}\t{}\t'.format(count, np.sum(wgs[i] == wes[i])))
+        a = wgs[i] > 0
+        b = wes[i] > 0
+        out.write('{}\t{}\t'.format(np.sum(a == b), np.sum(a & b) / np.sum(a | b)))
+        out.write('{}\t{}\t'.format(np.sum(ploidies),
+            np.sum(ploidies) - np.sum(np.maximum(wgs[i], wes[i])) + np.sum(np.minimum(wgs[i], wes[i]))))
+        if count >= 5:
+            out.write('{:.6f}\t{:.6f}\n'.format(
+                pearsonr(wgs[i], wes[i]).statistic, spearmanr(wgs[i], wes[i]).statistic))
+        else:
+            out.write('NA\tNA\n')
     return True
 
 
@@ -216,9 +206,9 @@ def main():
         out.write('# {}\n'.format(' '.join(sys.argv)))
         out.write(f'# depth threshold = {args.depth} * ploidy\n')
         out.write(f'# quality threshold = {args.quality}\n')
-        out.write('chrom\tstart\tref\talts\tgenes\texons\tpsv\tmean_ploidy\twgs_AF\twes_AF\t')
-        out.write('count\tfull_match\tmism1\tsum_size\tsum_match\tmean_diff\tmedian_diff\tpearson\tspearman\t')
-        out.write('event_conc\n')
+        out.write('chrom\tstart\tref\talts\tgenes\texons\tpsv\tmean_ploidy\tallele_ix\t')
+        out.write('wgs_AF\twes_AF\tcount\tfull_match\tevent_match\tjaccard\tsum_length\tsum_match'
+            '\tpearson\tspearman\n')
         sys.stderr.write('Processing VCF files\n')
         process_vcfs(wgs_vcf, wes_vcf, genes, exons, out, args.depth, args.quality)
 
