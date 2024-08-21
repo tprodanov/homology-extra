@@ -129,21 +129,21 @@ def process_var(wgs_var, wes_var, samples, genes, exons, out, depth, quality):
         out.write('\n')
         return True
 
-    if wgs_var.alleles != wes_var.alleles:
-        print(chrom, start + 1, wgs_var.alleles, wes_var.alleles, alleles, c1, c2)
-
     sum_ploidies = np.sum(ploidies)
     for i in range(n_alleles):
         out.write(f'{prefix}\t{i}\t{format_af(wgs_var, c1[i])}\t{format_af(wes_var, c2[i])}\t')
-        out.write('{}\t{}\t'.format(count, np.sum(wgs[i] == wes[i])))
-        a = wgs[i] > 0
-        b = wes[i] > 0
-        out.write('{}\t{}\t'.format(np.sum(a == b), np.sum(a & b) / np.sum(a | b)))
+        a = wgs[i]
+        b = wes[i]
+        differences = np.bincount(np.abs(a - b))
+        out.write('{}\t{}\t'.format(count, ','.join(map(str, differences))))
+        out.write('{}\t{}\t{}\t{}\t'.format(
+            np.sum((a == 0) & (b == 0)), np.sum((a == 0) & (b > 0)),
+            np.sum((a > 0) & (b == 0)), np.sum((a > 0) & (b > 0)),
+        ))
         out.write('{}\t{}\t'.format(np.sum(ploidies),
-            np.sum(ploidies) - np.sum(np.maximum(wgs[i], wes[i])) + np.sum(np.minimum(wgs[i], wes[i]))))
+            np.sum(ploidies) - np.sum(np.maximum(a, b)) + np.sum(np.minimum(a, b))))
         if count >= 5:
-            out.write('{:.6f}\t{:.6f}\n'.format(
-                pearsonr(wgs[i], wes[i]).statistic, spearmanr(wgs[i], wes[i]).statistic))
+            out.write('{:.6f}\t{:.6f}\n'.format(pearsonr(a, b).statistic, spearmanr(a, b).statistic))
         else:
             out.write('NA\tNA\n')
     return True
@@ -207,7 +207,7 @@ def main():
         out.write(f'# depth threshold = {args.depth} * ploidy\n')
         out.write(f'# quality threshold = {args.quality}\n')
         out.write('chrom\tstart\tref\talts\tgenes\texons\tpsv\tmean_ploidy\tallele_ix\t')
-        out.write('wgs_AF\twes_AF\tcount\tfull_match\tevent_match\tjaccard\tsum_length\tsum_match'
+        out.write('wgs_AF\twes_AF\tcount\tdifferences\tev00\tev01\tev10\tev11\tsum_length\tsum_match'
             '\tpearson\tspearman\n')
         sys.stderr.write('Processing VCF files\n')
         process_vcfs(wgs_vcf, wes_vcf, genes, exons, out, args.depth, args.quality)
