@@ -11,7 +11,9 @@ import parascopy.inner.genome as genome_
 
 def process_psvs(vcf, out_header):
     for var in vcf:
-        pos2 = var.info['pos2']
+        pos2 = var.info.get('pos2')
+        if pos2 is None:
+            continue
         if 'fval' in var.info:
             fvals = list(map(float, var.info['fval']))
         else:
