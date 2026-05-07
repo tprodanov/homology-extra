@@ -48,9 +48,9 @@ def get_overlap_counts(start, end, tree):
     return (('*', 1),)
 
 
-def count(vcf_filename, trees, count_homologous, partial):
+def count(vcf_filename, trees, count_homologous, partial, qual_thresh):
     """
-    For each locus, returns pair (total number, number of SNPs, number of indels) for any and high qualities.
+    For each locus, returns pair (total number, number of SNPs, number of indels) for all variants and high quality variants.
     """
     covered_positions = collections.defaultdict(IntervalTree) if count_homologous else None
     counts = collections.defaultdict(lambda: [0] * 6)
@@ -70,7 +70,7 @@ def count(vcf_filename, trees, count_homologous, partial):
                                 f'\n\n\nError in {vcf_filename} with {record.chrom}:{record.start + 1}: {reg}\n\n\n')
                             raise
 
-            high_qual = record.samples[0].get('GQ', 10000) >= 10
+            high_qual = record.samples[0].get('GQ', qual_thresh) >= qual_thresh
             is_snp = all(len(alt) == ref_len for alt in record.alts)
 
             for chrom, start, end in regions:
@@ -105,15 +105,21 @@ def main():
         help='Count variants partially if they overlap a region partially.')
     parser.add_argument('--homologous', action='store_true',
         help='Account for homologous coordinates (in pos2 info field).')
+    parser.add_argument('-q', '--qual', metavar='NUM', type=float, default=10,
+        help='Threshold for high quality genotype [%(default)s].')
     args = parser.parse_args()
 
     trees, loci = load_regions(args.regions)
-    counts_tpb = count(os.path.join(args.eval, 'tp-baseline.vcf.gz'), trees, args.homologous, args.partial)
-    counts_tpc = count(os.path.join(args.eval, 'tp.vcf.gz'), trees, args.homologous, args.partial)
-    counts_fp = count(os.path.join(args.eval, 'fp.vcf.gz'), trees, args.homologous, args.partial)
-    counts_fn = count(os.path.join(args.eval, 'fn.vcf.gz'), trees, args.homologous, args.partial)
+    counts_tpb = count(os.path.join(args.eval, 'tp-baseline.vcf.gz'), trees,
+        args.homologous, args.partial, args.qual)
+    counts_tpc = count(os.path.join(args.eval, 'tp.vcf.gz'), trees,
+        args.homologous, args.partial, args.qual)
+    counts_fp = count(os.path.join(args.eval, 'fp.vcf.gz'), trees,
+        args.homologous, args.partial, args.qual)
+    counts_fn = count(os.path.join(args.eval, 'fn.vcf.gz'), trees,
+        args.homologous, args.partial, args.qual)
 
-    types = 'any\tall any\tsnps any\tindels high\tall high\tsnps high\tindels'.split(' ')
+    types = ['any\tall', 'any\tsnps', 'any\tindels', 'high\tall', 'high\tsnps', 'high\tindels']
     with common.open_possible_gzip(args.output, 'w') as out:
         out.write('# {}\n'.format(' '.join(sys.argv)))
         out.write('region\tqual\tvar_type\ttp_base\ttp_call\tfp\tfn\n')
