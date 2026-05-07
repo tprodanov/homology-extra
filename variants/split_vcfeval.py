@@ -67,7 +67,7 @@ class Count:
         return self._counts[i]
 
 
-def count(vcf_filename, trees, count_homologous, partial, qual_thresh):
+def count(vcf_filename, trees, count_homologous, partial, qual_field, qual_thresh):
     """
     Returns
         - dictionary `locus -> Count` and the total number of variants.
@@ -93,7 +93,13 @@ def count(vcf_filename, trees, count_homologous, partial, qual_thresh):
                                 f'\n\n\nError in {vcf_filename} with {record.chrom}:{record.start + 1}: {reg}\n\n\n')
                             raise
 
-            high_qual = record.samples[0].get('GQ', qual_thresh) >= qual_thresh
+            if qual_field == 'GQ':
+                qual = record.qual
+            elif qual_field is None:
+                qual = -np.inf
+            else:
+                qual = record.sample[0].get(qual_field, -np.inf)
+            high_qual = qual >= qual_thresh
             is_snp = all(len(alt) == ref_len for alt in record.alts)
 
             for chrom, start, end in regions:
@@ -126,6 +132,8 @@ def main():
         help='Account for homologous coordinates (in pos2 info field).')
     parser.add_argument('-q', '--qual', metavar='NUM', type=float, default=10,
         help='Threshold for high quality genotype [%(default)s].')
+    parser.add_argument('--qual-field', metavar='STR', default='GQ',
+        help='Quality field, such as GQ (default) or QUAL.')
     parser.add_argument('--correct-fn', action='store_true',
         help='Correct FN counts by the difference in the baseline/call TP variant.')
     args = parser.parse_args()
@@ -133,7 +141,7 @@ def main():
     trees, loci = load_regions(args.regions)
     partial = args.partial
     counts_tp, total_calls = count(os.path.join(args.eval, 'tp.vcf.gz'), trees,
-        args.homologous, partial, args.qual)
+        args.homologous, partial, args.qual_field, args.qual)
     if args.correct_fn:
         with pysam.VariantFile(os.path.join(args.eval, 'tp-baseline.vcf.gz')) as baseline_vcf:
             total_baseline = 0
@@ -144,9 +152,9 @@ def main():
         fn_mult = 1.0
 
     counts_fp, _ = count(os.path.join(args.eval, 'fp.vcf.gz'), trees,
-        args.homologous, partial, args.qual)
+        args.homologous, partial, args.qual_field, args.qual)
     counts_fn, _ = count(os.path.join(args.eval, 'fn.vcf.gz'), trees,
-        args.homologous, partial, 0)
+        args.homologous, partial, None, 0)
 
     types = ['all', 'snps', 'indels']
     with common.open_possible_gzip(args.output, 'w') as out:
