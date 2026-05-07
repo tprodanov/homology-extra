@@ -67,7 +67,7 @@ class Count:
         return self._counts[i]
 
 
-def count(vcf_filename, trees, count_homologous, partial, qual_thresh, size_coef=1):
+def count(vcf_filename, trees, count_homologous, partial, qual_thresh):
     """
     Returns
         - dictionary `locus -> Count` and the total number of variants.
@@ -106,7 +106,7 @@ def count(vcf_filename, trees, count_homologous, partial, qual_thresh, size_coef
                 it = get_partial_counts(start, end, trees[chrom]) if partial and start + 1 < end \
                     else get_overlap_counts(start, end, trees[chrom])
                 for locus, size in it:
-                    counts[locus].add(is_snp, high_qual, size * size_coef)
+                    counts[locus].add(is_snp, high_qual, size)
     return counts, total_vars
 
 
@@ -126,34 +126,45 @@ def main():
         help='Account for homologous coordinates (in pos2 info field).')
     parser.add_argument('-q', '--qual', metavar='NUM', type=float, default=10,
         help='Threshold for high quality genotype [%(default)s].')
+    parser.add_argument('--correct-fn', action='store_true',
+        help='Correct FN counts by the difference in the baseline/call TP variant.')
     args = parser.parse_args()
 
     trees, loci = load_regions(args.regions)
     partial = args.partial
-    with pysam.VariantFile(os.path.join(args.eval, 'tp-baseline.vcf.gz')) as baseline_vcf:
-        total_baseline = 0
-        for rec in baseline_vcf:
-            total_baseline += len(rec.ref) if partial else 1
     counts_tp, total_calls = count(os.path.join(args.eval, 'tp.vcf.gz'), trees,
         args.homologous, partial, args.qual)
+    if args.correct_fn:
+        with pysam.VariantFile(os.path.join(args.eval, 'tp-baseline.vcf.gz')) as baseline_vcf:
+            total_baseline = 0
+            for rec in baseline_vcf:
+                total_baseline += len(rec.ref) if partial else 1
+        fn_mult = total_calls / total_baseline
+    else:
+        fn_mult = 1.0
+
     counts_fp, _ = count(os.path.join(args.eval, 'fp.vcf.gz'), trees,
         args.homologous, partial, args.qual)
     counts_fn, _ = count(os.path.join(args.eval, 'fn.vcf.gz'), trees,
-        args.homologous, partial, 0, total_calls / total_baseline)
+        args.homologous, partial, 0)
 
-    types = ['any\tall', 'any\tsnps', 'any\tindels', 'high\tall', 'high\tsnps', 'high\tindels']
+    types = ['all', 'snps', 'indels']
     with common.open_possible_gzip(args.output, 'w') as out:
         out.write('# {}\n'.format(' '.join(sys.argv)))
         out.write('region\tqual\tvar_type\ttp\tfp\tfn\n')
         for locus in itertools.chain(sorted(loci), ('*',)):
             for i, ty in enumerate(types):
-                tpb = counts_tpb[locus][i]
-                tpc = counts_tpc[locus][i]
-                fp = counts_fp[locus][i]
-                fn = counts_fn[locus][i]
-                if i == 0 and not args.all and tpb + tpc + fp + fn == 0:
+                tp_anyq = counts_tp[locus][i]
+                tp_highq = counts_tp[locus][i + 3]
+                fp_anyq = counts_fp[locus][i]
+                fp_highq = counts_fp[locus][i + 3]
+                fn = counts_fn[locus][i] * fn_mult
+
+                if i == 0 and not args.all and tp_anyq + fp_anyq + fn == 0:
                     break
-                out.write(f'{locus}\t{ty}\t{tp:.7g}\t{fp:.7g}\t{fn:.7g}\n')
+                out.write(f'{locus}\tany\t{ty}\t{tp_anyq:.7g}\t{fp_anyq:.7g}\t{fn:.7g}\n')
+                fn_highq = fn + tp_anyq - tp_highq
+                out.write(f'{locus}\thigh\t{ty}\t{tp_highq:.7g}\t{fp_highq:.7g}\t{fn_highq:.7g}\n')
 
 
 if __name__ == '__main__':
