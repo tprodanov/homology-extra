@@ -48,15 +48,38 @@ def get_overlap_counts(start, end, tree):
     return (('*', 1),)
 
 
-def count(vcf_filename, trees, count_homologous, partial, qual_thresh):
+class Count:
+    def __init__(self):
+        # any quality all, snps, indels; high quality all, snps, indels.
+        self._counts = np.zeros(6)
+
+    def add(self, snp: bool, highq: bool, val = 1):
+        self._counts[0] += val
+        self._counts[2 - int(snp)] += val
+        if highq:
+            self._counts[3] += val
+            self._counts[5 - int(snp)] += val
+
+    def __iter__(self):
+        return iter(self._counts)
+
+    def __getitem__(self, i):
+        return self._counts[i]
+
+
+def count(vcf_filename, trees, count_homologous, partial, qual_thresh, size_coef=1):
     """
-    For each locus, returns pair (total number, number of SNPs, number of indels) for all variants and high quality variants.
+    Returns
+        - dictionary `locus -> Count` and the total number of variants.
+        - if partial: sum reference length, otherwise: total number of variants.
     """
     covered_positions = collections.defaultdict(IntervalTree) if count_homologous else None
-    counts = collections.defaultdict(lambda: [0] * 6)
+    counts = collections.defaultdict(Count)
+    total_vars = 0
     with pysam.VariantFile(vcf_filename) as vcf:
         for record in vcf:
             ref_len = len(record.ref)
+            total_vars += ref_len if partial else 1
             regions = [(record.chrom, record.start, record.start + ref_len)]
             if count_homologous:
                 for reg in record.info['pos2']:
@@ -83,12 +106,8 @@ def count(vcf_filename, trees, count_homologous, partial, qual_thresh):
                 it = get_partial_counts(start, end, trees[chrom]) if partial and start + 1 < end \
                     else get_overlap_counts(start, end, trees[chrom])
                 for locus, size in it:
-                    counts[locus][0] += size
-                    counts[locus][2 - int(is_snp)] += size
-                    if high_qual:
-                        counts[locus][3] += size
-                        counts[locus][5 - int(is_snp)] += size
-    return counts
+                    counts[locus].add(is_snp, high_qual, size * size_coef)
+    return counts, total_vars
 
 
 def main():
@@ -110,19 +129,22 @@ def main():
     args = parser.parse_args()
 
     trees, loci = load_regions(args.regions)
-    counts_tpb = count(os.path.join(args.eval, 'tp-baseline.vcf.gz'), trees,
-        args.homologous, args.partial, args.qual)
-    counts_tpc = count(os.path.join(args.eval, 'tp.vcf.gz'), trees,
-        args.homologous, args.partial, args.qual)
-    counts_fp = count(os.path.join(args.eval, 'fp.vcf.gz'), trees,
-        args.homologous, args.partial, args.qual)
-    counts_fn = count(os.path.join(args.eval, 'fn.vcf.gz'), trees,
-        args.homologous, args.partial, args.qual)
+    partial = args.partial
+    with pysam.VariantFile(os.path.join(args.eval, 'tp-baseline.vcf.gz')) as baseline_vcf:
+        total_baseline = 0
+        for rec in baseline_vcf:
+            total_baseline += len(rec.ref) if partial else 1
+    counts_tp, total_calls = count(os.path.join(args.eval, 'tp.vcf.gz'), trees,
+        args.homologous, partial, args.qual)
+    counts_fp, _ = count(os.path.join(args.eval, 'fp.vcf.gz'), trees,
+        args.homologous, partial, args.qual)
+    counts_fn, _ = count(os.path.join(args.eval, 'fn.vcf.gz'), trees,
+        args.homologous, partial, 0, total_calls / total_baseline)
 
     types = ['any\tall', 'any\tsnps', 'any\tindels', 'high\tall', 'high\tsnps', 'high\tindels']
     with common.open_possible_gzip(args.output, 'w') as out:
         out.write('# {}\n'.format(' '.join(sys.argv)))
-        out.write('region\tqual\tvar_type\ttp_base\ttp_call\tfp\tfn\n')
+        out.write('region\tqual\tvar_type\ttp\tfp\tfn\n')
         for locus in itertools.chain(sorted(loci), ('*',)):
             for i, ty in enumerate(types):
                 tpb = counts_tpb[locus][i]
@@ -131,7 +153,7 @@ def main():
                 fn = counts_fn[locus][i]
                 if i == 0 and not args.all and tpb + tpc + fp + fn == 0:
                     break
-                out.write(f'{locus}\t{ty}\t{tpb:.5g}\t{tpc:.5g}\t{fp:.5g}\t{fn:.5g}\n')
+                out.write(f'{locus}\t{ty}\t{tp:.7g}\t{fp:.7g}\t{fn:.7g}\n')
 
 
 if __name__ == '__main__':
